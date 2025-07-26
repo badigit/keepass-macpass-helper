@@ -14,7 +14,7 @@ let usernames = [];
 
 const timebased = {
   words: {
-    otp: ['KPH: otp', 'KPH:otp', 'otp'],
+    otp: ['KPH: otp', 'KPH:otp', 'otp', 'KPOTP'],
     sotp: ['KPH: sotp', 'KPH:sotp', 'sotp'],
     botp: ['TimeOtp-Secret-Base32']
   },
@@ -679,9 +679,9 @@ document.addEventListener('click', async e => {
           await copy(s);
         }
         else {
-          alert(`No string-field entry with either "otp" or "sotp" key is detected.
+          alert(`No string-field entry with either "otp", "KPOTP" or "sotp" key is detected.
 
-  To generate one-time password tokens, save a new string-field entry with "KPH: otp" name and SECRET as value.`);
+  To generate one-time password tokens, save a new string-field entry with "KPOTP" or "KPH: otp" name and SECRET as value.`);
         }
       }
       catch (e) {
