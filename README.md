@@ -16,3 +16,7 @@ Helper extension for KeePass to find and insert credentials, generate passwords,
   * Edge: https://microsoftedge.microsoft.com/addons/detail/bfmglfdehkodoiinbclgoppembjfgjkj
   * Firefox: https://addons.mozilla.org/firefox/addon/keepasshelper/
   * Opera: https://addons.opera.com/extensions/details/keepasshelper/
+
+### Building
+
+Run `./build.sh` to create a `keepass-helper.zip` package from the `v3` folder.
