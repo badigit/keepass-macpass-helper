@@ -17,8 +17,7 @@
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "worker.js",
-    "scripts": ["worker.js"]
+    "service_worker": "worker.js"
   },
   "action": {
     "default_popup": "/data/cmd/index.html"

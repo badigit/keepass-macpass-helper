@@ -21,16 +21,26 @@ const timebased = {
   includes(o) {
     const {stringFields = []} = o;
 
+    // Отладочное логирование
+    console.log('OTP Debug - Проверяю запись:', o.name || o.Name);
+    console.log('OTP Debug - StringFields:', stringFields);
+    console.log('OTP Debug - UUID:', o.uuid);
+
     if (o) {
       const b = stringFields.some(o => timebased.words.otp.includes(o.Key)) ||
         stringFields.some(o => timebased.words.sotp.includes(o.Key)) ||
         stringFields.some(o => timebased.words.botp.includes(o.Key));
 
+      console.log('OTP Debug - Найдены поля OTP/SOTP/BOTP:', b);
+
       if (b) {
         return Promise.resolve(true);
       }
       if (o.uuid) {
-        return engine.asyncOTP(o.uuid).then(totp => totp !== '');
+        return engine.asyncOTP(o.uuid).then(totp => {
+          console.log('OTP Debug - engine.asyncOTP результат:', totp);
+          return totp !== '';
+        });
       }
     }
     return Promise.resolve(false);
@@ -38,8 +48,14 @@ const timebased = {
   async get(o) {
     const {stringFields} = o;
 
+    console.log('OTP Debug GET - Запись:', o.name || o.Name);
+    console.log('OTP Debug GET - StringFields:', stringFields);
+
     const otp = stringFields.filter(o => timebased.words.otp.includes(o.Key)).shift();
     const sotp = stringFields.filter(o => timebased.words.sotp.includes(o.Key)).shift();
+
+    console.log('OTP Debug GET - Найдено OTP поле:', otp);
+    console.log('OTP Debug GET - Найдено SOTP поле:', sotp);
 
     if (sotp) {
       return await engine.otp(await decrypt(sotp.Value));
@@ -53,6 +69,8 @@ const timebased = {
     const period = stringFields.filter(o => ['TimeOtp-Period'].includes(o.Key)).shift();
     const digits = stringFields.filter(o => ['TimeOtp-Length'].includes(o.Key)).shift();
 
+    console.log('OTP Debug GET - Встроенный KeePass OTP:', {secret, period, digits});
+
     if (secret) {
       const args = new URLSearchParams();
       args.set('secret', secret.Value);
@@ -65,10 +83,12 @@ const timebased = {
     if (o.uuid) {
       const v = engine.asyncOTP(o.uuid);
       if (v) {
+        console.log('OTP Debug GET - asyncOTP результат:', v);
         return v;
       }
     }
 
+    console.log('OTP Debug GET - OTP не найден');
     throw Error(Error('NO_OTP_Provided'));
   }
 };

@@ -177,6 +177,9 @@ class KeePass extends SimpleStorage {
       'SubmitUrl': submiturl,
       'Realm': realm
     }, undefined, true, ['Url', 'SubmitUrl', 'Realm']);
+    
+    console.log('KeePassHttp Debug - Исходный ответ:', r);
+    
     if (r && r.Entries) {
       const iv = KeePass.s2u(atob(r.Nonce));
 
@@ -189,11 +192,16 @@ class KeePass extends SimpleStorage {
         e.Name = await d(e.Name);
         e.Password = await d(e.Password);
 
+        console.log(`KeePassHttp Debug - Запись ${n}:`, e.Name);
+        console.log(`KeePassHttp Debug - StringFields до декодирования:`, e.StringFields);
+
         for (let m = 0; m < (e.StringFields || []).length; m += 1) {
           const o = e.StringFields[m];
           o.Key = (await d(o.Key)).replace('KPH: ', '');
           o.Value = await d(o.Value);
         }
+        
+        console.log(`KeePassHttp Debug - StringFields после декодирования:`, e.StringFields);
       }
     }
     return r;
