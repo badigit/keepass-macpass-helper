@@ -12,6 +12,14 @@ let url;
 let tab = {};
 let usernames = [];
 
+const errorMessage = e => {
+  if (typeof e === 'string') {
+    return e;
+  }
+  return e?.message || String(e || '');
+};
+const isFrameErrorPage = e => /Frame with ID \d+ is showing error page/i.test(errorMessage(e));
+
 const timebased = {
   words: {
     otp: ['KPH: otp', 'KPH:otp', 'otp', 'KPOTP'],
@@ -808,7 +816,8 @@ const access = () => new Promise(resolve => chrome.storage.local.get({
       throw Error('Cannot detect active tab');
     }
     tab = tabs[0];
-    search.value = url = tab.url;
+    // `pendingUrl` is useful when a tab is in auth challenge/error state.
+    search.value = url = tab.pendingUrl || tab.url;
 
     let aElement = false;
     try {
@@ -839,8 +848,8 @@ const access = () => new Promise(resolve => chrome.storage.local.get({
     }
     catch (e) {
       console.warn(e);
-      if (!tab.url || tab.url.startsWith('http') === false) {
-        throw Error(e);
+      if (isFrameErrorPage(e) === false && (!url || url.startsWith('http') === false)) {
+        throw Error(errorMessage(e));
       }
     }
 
