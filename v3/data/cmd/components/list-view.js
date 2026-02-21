@@ -76,19 +76,31 @@ class SimpleListView extends HTMLElement {
         }
         select {
           position: absolute;
+          top: 0;
+          left: 0;
           border: none;
           outline: none;
+          appearance: none;
+          -webkit-appearance: none;
           width: 100%;
           height: fit-content;
+          line-height: var(--height);
           padding: 0;
           background-color: transparent;
           overflow: hidden;
           scrollbar-width: none;
+          color: transparent;
+          -webkit-text-fill-color: transparent;
         }
         option {
           box-sizing: border-box;
           background-color: transparent;
           text-indent: 200vw;
+          color: transparent !important;
+          -webkit-text-fill-color: transparent;
+          text-shadow: none !important;
+          font: inherit;
+          line-height: var(--height);
           border-radius: 0;
           height: var(--height);
         }
@@ -100,16 +112,13 @@ class SimpleListView extends HTMLElement {
           background: var(--selected-inactive-bg) linear-gradient(0deg, var(--selected-inactive-bg) 0%,
             var(--selected-inactive-bg) 500%);
         }
-        :host([headers=false]) option:first-of-type,
         :host([headers=false]) #header {
           display: none;
         }
       </style>
       <style id="extra"></style>
       <div id="parent">
-        <select multiple id="select" tabindex="1">
-          <option disabled part=header>header</option>
-        </select>
+        <select multiple id="select" tabindex="1"></select>
         <div id="header">
           <slot></slot>
         </div>
@@ -143,7 +152,7 @@ class SimpleListView extends HTMLElement {
     const e = this.#select.options[this.#select.selectedIndex];
     if (e) {
       // e.scrollIntoViewIfNeeded(false);
-      if (this.#select.options[1] && this.#select.options[1].selected) {
+      if (this.#select.options[0] && this.#select.options[0].selected) {
         this.#parent.scrollTop = 0;
       }
       else if (e.offsetTop < this.#parent.scrollTop) {
@@ -171,7 +180,7 @@ class SimpleListView extends HTMLElement {
     this.#parent.style.setProperty('--structure', c);
   }
   #adjust() {
-    this.#select.size = this.#select.options.length + (this.getAttribute('headers') === 'false' ? -1 : 0);
+    this.#select.size = this.#select.options.length;
     this.setAttribute('size', this.#select.size);
   }
   add(parts, name, value, selected = false) {
@@ -218,12 +227,13 @@ class SimpleListView extends HTMLElement {
     }
   }
   clear() {
-    while (this.#select.options.length > 1) {
-      this.removeIndex(1);
+    while (this.#select.options.length > 0) {
+      this.removeIndex(0);
     }
   }
   connectedCallback() {
     this.#resize();
+    this.#adjust();
     // make sure selected option is visible
     this.#select.addEventListener('change', () => {
       this.#scrollIntoViewIfNeeded();

@@ -19,6 +19,19 @@ const errorMessage = e => {
   return e?.message || String(e || '');
 };
 const isFrameErrorPage = e => /Frame with ID \d+ is showing error page/i.test(errorMessage(e));
+const safeExecuteScript = async options => {
+  try {
+    return await chrome.scripting.executeScript(options);
+  }
+  catch (e) {
+    if (isFrameErrorPage(e)) {
+      safeExecuteScript.frameError = true;
+      return [];
+    }
+    throw e;
+  }
+};
+safeExecuteScript.frameError = false;
 
 const timebased = {
   words: {
@@ -408,7 +421,7 @@ insert.fields = async o => {
     }
   }
 
-  return await chrome.scripting.executeScript({
+  return await safeExecuteScript({
     target: {
       tabId: tab.id,
       allFrames
@@ -461,7 +474,7 @@ insert.fields = async o => {
   });
 };
 
-insert.username = username => chrome.scripting.executeScript({
+insert.username = username => safeExecuteScript({
   target: {
     tabId: tab.id,
     allFrames
@@ -518,7 +531,7 @@ insert.username = username => chrome.scripting.executeScript({
   },
   args: [username]
 });
-insert.password = password => chrome.scripting.executeScript({
+insert.password = password => safeExecuteScript({
   target: {
     tabId: tab.id,
     allFrames
@@ -570,7 +583,7 @@ insert.password = password => chrome.scripting.executeScript({
   },
   args: [password]
 });
-insert.submit = () => chrome.scripting.executeScript({
+insert.submit = () => safeExecuteScript({
   target: {
     tabId: tab.id,
     allFrames
@@ -627,6 +640,7 @@ document.addEventListener('click', async e => {
     }
     //
     if (cmd && cmd.startsWith('insert-')) {
+      safeExecuteScript.frameError = false;
       const checked = list.selectedValues[0][0];
 
       let inserted = false;
@@ -646,12 +660,21 @@ document.addEventListener('click', async e => {
         inserted = inserted || r.reduce((p, c) => p || c.result, false);
       }
 
+      if (safeExecuteScript.frameError) {
+        chrome.runtime.sendMessage({
+          cmd: 'notify',
+          message: 'Cannot insert into browser auth/error pages. Use Copy for this page.'
+        });
+        window.close();
+        return;
+      }
+
       // do we have a CORS frame
       // does not work in Firefox since the user-action is not detected!
       if (inserted !== true) {
         const origins = [];
         if (e.isTrusted && /Firefox/.test(navigator.userAgent) === false) {
-          const r = await chrome.scripting.executeScript({
+          const r = await safeExecuteScript({
             target: {
               tabId: tab.id
             },
@@ -660,7 +683,18 @@ document.addEventListener('click', async e => {
               .filter(s => s && s.startsWith('http') && s.startsWith(location.origin) === false)
           });
 
-          origins.push(...r[0].result);
+          if (safeExecuteScript.frameError) {
+            chrome.runtime.sendMessage({
+              cmd: 'notify',
+              message: 'Cannot insert into browser auth/error pages. Use Copy for this page.'
+            });
+            window.close();
+            return;
+          }
+
+          if (r[0] && Array.isArray(r[0].result)) {
+            origins.push(...r[0].result);
+          }
         }
 
         if (origins.length) {
