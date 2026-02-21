@@ -19,6 +19,16 @@ const errorMessage = e => {
   return e?.message || String(e || '');
 };
 const isFrameErrorPage = e => /Frame with ID \d+ is showing error page/i.test(errorMessage(e));
+const isRestrictedTabUrl = value => {
+  try {
+    const protocol = new URL(value).protocol;
+    return ['chrome:', 'edge:', 'about:', 'chrome-extension:', 'moz-extension:', 'devtools:'].includes(protocol);
+  }
+  catch (e) {
+    return false;
+  }
+};
+const isUrlAccessError = e => /Cannot access (a|contents of) .* URL/i.test(errorMessage(e));
 const safeExecuteScript = async options => {
   try {
     return await chrome.scripting.executeScript(options);
@@ -882,7 +892,12 @@ const access = () => new Promise(resolve => chrome.storage.local.get({
     }
     catch (e) {
       console.warn(e);
-      if (isFrameErrorPage(e) === false && (!url || url.startsWith('http') === false)) {
+      const expected =
+        isFrameErrorPage(e) ||
+        isRestrictedTabUrl(url) ||
+        isUrlAccessError(e);
+
+      if (expected === false && (!url || url.startsWith('http') === false)) {
         throw Error(errorMessage(e));
       }
     }
