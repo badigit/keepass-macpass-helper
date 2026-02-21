@@ -1,13 +1,12 @@
 /* global search */
 
 {
-  const keys = self.keys = {};
+  const keys = {};
   chrome.storage.local.get({
     keys: {
       'copy': {
         code: 'KeyC',
-        meta: ['meta'],
-        click: 'click'
+        meta: ['meta']
       },
       'otp': {
         code: 'KeyO',
@@ -15,18 +14,15 @@
       },
       'password': {
         code: 'KeyX',
-        meta: ['meta'],
-        click: 'ctrl-click'
+        meta: ['meta']
       },
       'insert-both': {
         code: 'KeyB',
-        meta: ['meta', 'shift'],
-        click: 'click'
+        meta: ['meta', 'shift']
       },
       'insert-both-no-submit': {
         code: 'KeyB',
-        meta: ['meta'],
-        click: 'ctrl-click'
+        meta: ['meta']
       },
       'insert-login': {
         code: 'KeyU',
@@ -43,15 +39,10 @@
       'ssdb': {
         code: 'KeyD',
         meta: ['meta']
-      },
-      'passkey': {
-        code: 'KeyK',
-        meta: ['meta']
       }
     }
   }).then(prefs => {
     Object.assign(keys, prefs.keys);
-
     for (const e of document.querySelectorAll('[title]')) {
       if (e.title.includes('{{shortcut-')) {
         e.title = e.title.replace(/{{shortcut-([a-zA-Z0-9_-]+)}}/g, (match, key) => {
@@ -66,24 +57,12 @@
           return m.join(' + ') + ' + ' + o.code.slice(-1);
         });
       }
-      if (e.title.includes('{{click-')) {
-        e.title = e.title.replace(/{{click-([a-zA-Z0-9_-]+)}}/g, (match, key) => {
-          const o = keys[key];
-
-          return o.click === 'click' ? 'Click on the button' : 'Meta/Shift + Click on the button';
-        });
-      }
     }
   });
 
   const commands = {
     'copy': () => {
-      document.querySelector('[data-cmd="copy"]').dispatchEvent(
-        new CustomEvent('click', {
-          'detail': 'copy',
-          'bubbles': true
-        })
-      );
+      document.querySelector('[data-cmd="copy"]').click();
     },
     'otp': () => {
       document.querySelector('[data-cmd="otp"]').click();
@@ -97,12 +76,7 @@
       );
     },
     'insert-both': () => {
-      document.querySelector('[data-cmd="insert-both"]').dispatchEvent(
-        new CustomEvent('click', {
-          'detail': 'submit',
-          'bubbles': true
-        })
-      );
+      document.querySelector('[data-cmd="insert-both"]').click();
     },
     'insert-both-no-submit': () => {
       document.querySelector('[data-cmd="insert-both"]').dispatchEvent(
@@ -117,9 +91,6 @@
     },
     'insert-password': () => {
       document.querySelector('[data-cmd="insert-password"]').click();
-    },
-    'passkey': () => {
-      document.querySelector('[data-cmd="passkey"]').click();
     },
     'search': () => {
       search.focus();
@@ -149,7 +120,6 @@
       }
 
       e.preventDefault();
-
       func(e);
       break;
     }

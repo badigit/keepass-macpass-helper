@@ -4,8 +4,7 @@
 const KEYS = {
   'copy': {
     code: 'KeyC',
-    meta: ['meta'],
-    click: 'click'
+    meta: ['meta']
   },
   'otp': {
     code: 'KeyO',
@@ -13,18 +12,15 @@ const KEYS = {
   },
   'password': {
     code: 'KeyX',
-    meta: ['meta'],
-    click: 'ctrl-click'
+    meta: ['meta']
   },
   'insert-both': {
     code: 'KeyB',
-    meta: ['meta', 'shift'],
-    click: 'click'
+    meta: ['meta', 'shift']
   },
   'insert-both-no-submit': {
     code: 'KeyB',
-    meta: ['meta'],
-    click: 'ctrl-click'
+    meta: ['meta']
   },
   'insert-login': {
     code: 'KeyU',
@@ -41,21 +37,17 @@ const KEYS = {
   'ssdb': {
     code: 'KeyD',
     meta: ['meta']
-  },
-  'passkey': {
-    code: 'KeyK',
-    meta: ['meta']
   }
 };
 
-const toast = (msg, callback = () => {}, timeout = 2000) => {
+const toast = (msg, callback = () => {}) => {
   const e = document.getElementById('toast');
   e.textContent = msg;
   window.clearTimeout(toast.id);
   toast.id = setTimeout(() => {
     e.textContent = '';
     callback();
-  }, timeout);
+  }, 2000);
 };
 
 if (/Firefox/.test(navigator.userAgent)) {
@@ -119,16 +111,9 @@ function restore() {
     document.getElementById('sort.direction').value = prefs.sort.direction;
 
     for (const [name, o] of Object.entries(prefs.keys)) {
-      const parent = document.querySelector(`[data-shortcut="${name}"]`);
-      const [shift, meta] = parent.querySelectorAll('label input');
+      const [shift, meta] = document.querySelectorAll(`[data-shortcut="${name}"] label input`);
       shift.checked = o.meta.includes('shift');
       meta.checked = o.meta.includes('meta');
-      parent.querySelector('input[type=text]').value = o.code;
-
-      const select = parent.querySelector('select');
-      if (select) {
-        select.value = 'click' in o ? o.click : KEYS[name].click;
-      }
     }
   });
 }
@@ -140,29 +125,14 @@ async function save() {
   const ps = await chrome.storage.local.get({
     keys: KEYS
   });
-  const validKeys = [...document.getElementById('keys').options].map(o => o.value);
   for (const name of Object.keys(ps.keys)) {
-    const parent = document.querySelector(`[data-shortcut="${name}"]`);
-    const [shift, meta] = parent.querySelectorAll('label input');
-    const code = parent.querySelector('input[type=text]').value;
-
-    if (code !== '' && validKeys.includes(code) === false) {
-      const msg = 'Invalid key code for ' + name + '. Please select a value from the suggestion list (e.g., "KeyC")';
-      return toast(msg, undefined, 10000);
-    }
-
+    const [shift, meta] = document.querySelectorAll(`[data-shortcut="${name}"] label input`);
     ps.keys[name].meta = [];
     if (shift.checked) {
       ps.keys[name].meta.push('shift');
     }
     if (meta.checked || ps.keys[name].meta.length === 0) {
       ps.keys[name].meta.push('meta');
-    }
-    ps.keys[name].code = code;
-
-    const select = parent.querySelector('select');
-    if (select) {
-      ps.keys[name].click = select.value;
     }
   }
 
@@ -191,28 +161,6 @@ async function save() {
 
 document.addEventListener('DOMContentLoaded', restore);
 document.getElementById('save').addEventListener('click', save);
-
-document.addEventListener('change', e => {
-  const select = e.target;
-  if (select.tagName === 'SELECT' && select.closest('.m2')) {
-    const parent = select.closest('[data-shortcut]');
-    const name = parent.dataset.shortcut;
-    let partnerName;
-
-    if (name === 'copy') partnerName = 'password';
-    else if (name === 'password') partnerName = 'copy';
-    else if (name === 'insert-both') partnerName = 'insert-both-no-submit';
-    else if (name === 'insert-both-no-submit') partnerName = 'insert-both';
-
-    if (partnerName) {
-      const partnerSelect = document.querySelector(`[data-shortcut="${partnerName}"] select`);
-      if (partnerSelect) {
-        partnerSelect.value = select.value === 'click' ? 'ctrl-click' : 'click';
-      }
-    }
-  }
-});
-
 document.getElementById('example').addEventListener('click', () => {
   document.getElementById('json').value = JSON.stringify([{
     'url': 'https://github.com/login',
@@ -262,43 +210,13 @@ document.getElementById('check').addEventListener('click', () => {
   }
 });
 
-const cc = (target, content, value) => {
-  target.disabled = true;
-  target.textContent = 'Done!';
-  clearTimeout(cc.id);
-  cc.id = setTimeout(() => {
-    target.textContent = content;
-    target.value = value;
-    target.disabled = false;
-  }, 2000);
-};
-document.getElementById('all-frames').addEventListener('click', e => {
-  if (e.target.value === 'reverse') {
-    chrome.permissions.remove({
-      origins: ['<all_urls>']
-    });
-    cc(e.target, 'Access Remote Frames Permission', 'direct');
-  }
-  else {
-    chrome.permissions.request({
-      origins: ['<all_urls>']
-    }).then(granted => {
-      if (granted) {
-        cc(e.target, 'Revoke Remote Frames Permission', 'reverse');
-      }
-    });
-  }
-});
+document.getElementById('all-frames').addEventListener('click', () => chrome.permissions.request({
+  origins: ['<all_urls>']
+}));
 // hide granted permissions
 chrome.permissions.contains({
   origins: ['<all_urls>']
-}, granted => {
-  if (granted) {
-    const button = document.getElementById('all-frames');
-    button.textContent = 'Revoke Remote Frames Permission';
-    button.value = 'reverse';
-  }
-});
+}, granted => granted && document.getElementById('all-frames').classList.add('hidden'));
 chrome.permissions.contains({
   permissions: ['webNavigation'],
   origins: ['<all_urls>']
@@ -324,7 +242,6 @@ document.getElementById('kwpass-file').onclick = () => {
     if (files.length === 1) {
       const file = await read(files[0]);
       await kwpass.prepare();
-      await kwpass.dettach();
       await kwpass.attach(file);
     }
     else if (files.length === 2) {
@@ -339,7 +256,6 @@ document.getElementById('kwpass-file').onclick = () => {
         await read(key)
       ];
       await kwpass.prepare();
-      await kwpass.dettach();
       await kwpass.attach(...args);
     }
     else {
@@ -347,45 +263,28 @@ document.getElementById('kwpass-file').onclick = () => {
     }
     toast('Database is stored');
     chrome.storage.session.remove('kw:password');
-  }).catch(e => toast(e.message));
+  }).catch(e => alert(e.message));
 };
 document.getElementById('kwpass-remove').addEventListener('click', () => {
   const next = () => kwpass.dettach().then(() => {
+    toast('Database is removed');
     chrome.runtime.sendMessage({
       cmd: 'kwpass-remove'
     });
-    toast('Database is removed');
   }).catch(e => toast('Error: ' + e.message));
   if (kwpass.db) {
     next();
   }
   else {
-    kwpass.prepare().then(next).catch(e => {
-      console.error(e);
-      toast(e.message);
-    });
+    kwpass.prepare().then(next);
   }
 });
 
-document.getElementById('kwpass-download').addEventListener('click', async () => {
-  document.getElementById('prompt').showModal();
-  document.querySelector('#prompt input').value = '';
-
-  const password = await new Promise(resolve => {
-    document.querySelector('#prompt button').onclick = e => {
-      e.target.closest('dialog').close();
-      resolve('');
-    };
-    document.querySelector('#prompt form').onsubmit = e => {
-      e.preventDefault();
-      e.target.closest('dialog').close();
-      resolve(document.querySelector('#prompt input').value);
-    };
-  });
-
+document.getElementById('kwpass-download').addEventListener('click', () => {
+  const password = prompt('Enter the password', '');
   if (password) {
     const next = () => kwpass.open(password).then(() => kwpass.export()).catch(e => {
-      toast('[Error] ' + e.message);
+      toast('Error: ' + e.message);
       console.warn(e);
     });
     if (kwpass.db) {
@@ -393,36 +292,6 @@ document.getElementById('kwpass-download').addEventListener('click', async () =>
     }
     else {
       kwpass.prepare().then(next);
-    }
-  }
-});
-
-document.getElementById('kwpass-create').addEventListener('click', async () => {
-  document.getElementById('prompt').showModal();
-  document.querySelector('#prompt input').value = '';
-
-  const password = await new Promise(resolve => {
-    document.querySelector('#prompt button').onclick = e => {
-      e.target.closest('dialog').close();
-      resolve('');
-    };
-    document.querySelector('#prompt form').onsubmit = e => {
-      e.preventDefault();
-      e.target.closest('dialog').close();
-      resolve(document.querySelector('#prompt input').value);
-    };
-  });
-
-  if (password) {
-    try {
-      await kwpass.prepare();
-      await kwpass.dettach();
-      await kwpass.create(password);
-      toast('Database is ready');
-    }
-    catch (e) {
-      console.error(e);
-      toast(e.message);
     }
   }
 });
@@ -496,15 +365,11 @@ document.getElementById('ssdb-import').addEventListener('click', () => {
   };
   input.click();
 });
-document.getElementById('ssdb-clear').onclick = async () => {
+document.getElementById('ssdb-clear').onclick = () => {
   if (confirm(`Are you are you want to remove all credentials in the browser's synced storage?`)) {
-    const prefs = await chrome.storage.sync.get(null);
-    for (const key of Object.keys(prefs)) {
-      if (key.startsWith('A:')) {
-        await chrome.storage.sync.remove(key);
-      }
-    }
-    toast('Your passwords in the synced storage are permanently removed');
+    chrome.storage.sync.clear(() => {
+      toast('Your passwords in the synced storage are permanently removed');
+    });
   }
 };
 

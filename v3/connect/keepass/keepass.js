@@ -34,20 +34,14 @@ class KeePass extends SimpleStorage {
 
       for (const name of names) {
         if (obj[name]) {
-          if (Array.isArray(obj[name])) {
-            for (let n = 0; n < obj[name].length; n += 1) {
-              obj[name][n] = await e(obj[name][n], true);
-            }
-          }
-          else {
-            obj[name] = await e(obj[name], true);
-          }
+          obj[name] = await e(obj[name], true);
         }
         else {
           delete obj[name];
         }
       }
     }
+
     setTimeout(() => controller.abort(), timeout);
     const r = await fetch(this.host, {
       method: 'POST',
@@ -56,10 +50,7 @@ class KeePass extends SimpleStorage {
       },
       body: JSON.stringify(obj),
       signal: controller.signal
-    }).catch(() => ({
-      ok: false,
-      status: -1
-    }));
+    });
     if (r.ok) {
       return r.json();
     }
@@ -68,11 +59,7 @@ class KeePass extends SimpleStorage {
       j = await r.json();
     }
     catch (e) {
-      if (r.status === 503) {
-        throw Error(`KeePassHTTP Failed (${r.status}). Is a database currently open?`);
-      }
-      throw Error(`KeePassHTTP Failed (${r.status}).` +
-        ` Either KeePass is not running or communication is broken`);
+      throw Error('Cannot connect to KeePassHTTP. Either KeePass is not running or communication is broken');
     }
     throw Error(j.Error || 'Unknown Error');
   }
@@ -124,10 +111,8 @@ class KeePass extends SimpleStorage {
       });
     }
     catch (e) {
-      throw Error(e.message);
+      throw Error(`Cannot connect to the database at "${host}"`);
     }
-
-    this.version = Number((r.Version || '1.8.4.1').replace(/\./g, ''));
 
     if (r && r.Hash) {
       const prefs = await this.read({
@@ -183,11 +168,19 @@ class KeePass extends SimpleStorage {
 
     return r;
   }
-  async logins({url, submiturl, realm, names = [], query}) {
-    const Entries = new Map();
-    const resonse = {};
-
-    const convert = async r => {
+  async logins({url, submiturl, realm}) {
+    const r = await this.post({
+      'RequestType': 'get-logins',
+      'TriggerUnlock': 'true',
+      'SortSelection': 'false',
+      'Url': url,
+      'SubmitUrl': submiturl,
+      'Realm': realm
+    }, undefined, true, ['Url', 'SubmitUrl', 'Realm']);
+    
+    console.log('KeePassHttp Debug - Исходный ответ:', r);
+    
+    if (r && r.Entries) {
       const iv = KeePass.s2u(atob(r.Nonce));
 
       const d = await this.decrypt(iv);
@@ -198,116 +191,29 @@ class KeePass extends SimpleStorage {
         e.Login = await d(e.Login);
         e.Name = await d(e.Name);
         e.Password = await d(e.Password);
-        e.uuid = await d(e.Uuid);
-        e.from = 'keepass';
-        if (e.Group && e.Group.Name) {
-          e.path = await d(e.Group.Name).then(s => s.split('/'));
-          e.group = e.path.at(-1);
-        }
+
+        console.log(`KeePassHttp Debug - Запись ${n}:`, e.Name);
+        console.log(`KeePassHttp Debug - StringFields до декодирования:`, e.StringFields);
 
         for (let m = 0; m < (e.StringFields || []).length; m += 1) {
           const o = e.StringFields[m];
           o.Key = (await d(o.Key)).replace('KPH: ', '');
           o.Value = await d(o.Value);
         }
-      }
-    };
-
-    {
-      const r = await this.post({
-        'RequestType': 'get-logins',
-        'TriggerUnlock': 'true',
-        'SortSelection': 'false',
-        'Url': url,
-        'SubmitUrl': submiturl,
-        'Realm': realm
-      }, undefined, true, ['Url', 'SubmitUrl', 'Realm']);
-
-      if (r) {
-        if (r.Entries && r.Success) {
-          await convert(r);
-          for (const Entry of r.Entries) {
-            Entries.set(Entry.Uuid, Entry);
-          }
-          delete r.Entries;
-        }
-        Object.assign(resonse, r);
+        
+        console.log(`KeePassHttp Debug - StringFields после декодирования:`, e.StringFields);
       }
     }
-    // custom search
-    if (query) {
-      try {
-        const r = await this.post({
-          'RequestType': 'get-logins-custom-search',
-          'TriggerUnlock': 'true',
-          'SortSelection': 'false',
-          'SearchString': query,
-          'SearchInTitles': 'true',
-          'SearchInUrls': 'true'
-        }, undefined, true, ['SearchString']);
-        if (r) {
-          if (r.Entries && r.Success) {
-            await convert(r);
-            for (const Entry of r.Entries) {
-              Entries.set(Entry.Uuid, Entry);
-            }
-            delete r.Entries;
-          }
-          Object.assign(resonse, r);
-        }
-      }
-      catch (e) {
-        console.info(e);
-      }
-    }
-    resonse.Count = Entries.size;
-    resonse.Entries = Array.from(Entries.values());
-
-    return resonse;
+    return r;
   }
-  async set({url, submiturl, name, login, password, uuid, stringFields = []}) {
-    const iv = this.iv();
-    const e = await this.encrypt(iv);
-
-    const obj = {
-      'RequestType': 'set-login'
-    };
-    if (url) {
-      obj.Url = await e(url, true);
-    }
-    if (submiturl) {
-      obj.SubmitUrl = await e(submiturl, true);
-    }
-    // Supports on KeePassHTTP > 2.1.0.0
-    if (name) {
-      obj.Name = await e(name, true);
-    }
-    if (login) {
-      obj.Login = await e(login, true);
-    }
-    if (password) {
-      obj.Password = await e(password, true);
-    }
-    if (uuid) {
-      obj.Uuid = await e(uuid, true);
-    }
-
-    // Supports on KeePassHTTP > 2.1.0.0
-    if (stringFields.length > 0) {
-      obj.StringFields = {};
-
-      for (const {key, value} of stringFields) {
-        obj.StringFields[await e(key, true)] = await e(value, true);
-      }
-    }
-
-    obj.Nonce = KeePass.u2b(iv);
-    obj.Verifier = await e(obj.Nonce);
-
-    if (this.id) {
-      obj.Id = this.id;
-    }
-    return this.post(obj, undefined, false);
+  set({url, submiturl, login, password}) {
+    return this.post({
+      'RequestType': 'set-login',
+      'Login': login,
+      'Password': password,
+      'Url': url,
+      'SubmitUrl': submiturl
+    }, undefined, true, ['Login', 'Password', 'Url', 'SubmitUrl']);
   }
   // high-level access
   async search(query) {

@@ -37,7 +37,6 @@ class KeePassXC extends SimpleStorage {
         'clientID': this.clientID,
         'publicKey': this.btoa(this.keyPair.publicKey)
       });
-
       if (resp && resp.success === 'true') {
         this.serverPublicKey = this.atob(resp.publicKey);
       }
@@ -190,21 +189,18 @@ class KeePassXC extends SimpleStorage {
       throw Error(resp.error || 'Cannot retrieve credentials');
     });
   }
-  /* stringFields seems to be ignored, Title (Name) is also ignored */
-  'set-login'({url, submiturl, login, password, uuid, stringFields = []}) {
+  'set-login'({url, submiturl, login, password}) {
     return this.securePost({
       'action': 'set-login',
       url,
       submiturl,
       login,
-      password,
-      uuid,
-      stringFields
+      password
     }).then(resp => {
       if (resp.success === 'true') {
         return;
       }
-      throw Error(resp.error || 'Cannot set credential');
+      throw Error(resp.error || 'Cannot retrieve credentials');
     });
   }
   'get-totp'(uuid) {
@@ -229,7 +225,6 @@ class KeePassXC extends SimpleStorage {
 
     return {
       Entries: resp.map(e => Object.assign(e, {
-        from: 'keepassxc',
         Login: e.login,
         Name: e.name,
         Password: e.password,

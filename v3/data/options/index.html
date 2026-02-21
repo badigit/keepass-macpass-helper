@@ -6,18 +6,6 @@
   <link rel="stylesheet" type="text/css" href="index.css">
 </head>
 <body>
-  <dialog id="prompt">
-    <form>
-      <p>
-        <label for="password-input">Enter Password:</label>
-        <input type="password" id="password-input" required>
-      </p>
-      <div>
-        <button type="button">Cancel</button>
-        <button type="submit">OK</button>
-      </div>
-    </form>
-  </dialog>
   <p class="save">Make sure to press the "Save Options" button!</p>
   <h2 class="heading">Connection</h2>
   <div class="mm1m">
@@ -30,17 +18,11 @@
     <input type="text" id="xc-native-id">
     <input type="button" value="Generate Manifest" id="keepassxc-manifest">
     <input type="radio" name="method" id="kwpass">
-    <label for="kwpass"><a target="_blank" data-href="faq17">Local File</a> (writes to internal database)</label>
+    <label for="kwpass"><a target="_blank" data-href="faq17">Local File</a> (read-only) (beta)</label>
     <div style="grid-column: 3/5; text-align: end;" class="fl">
-      <div>
-        <input type="button" id="kwpass-create" value="Create new Database" title="Create a blank database and use it as the storage">
-        <span>OR</span>
-        <input type="button" id="kwpass-file" value="Choose File(s)" title="Provide the database file and key file (*.key*)(optional)">
-      </div>
-      <div>
-        <input type="button" id="kwpass-remove" value="Delete File(s)">
-        <input type="button" id="kwpass-download" value="Download Database">
-      </div>
+      <input type="button" id="kwpass-download" value="Download as KDBX3">
+      <input type="button" id="kwpass-remove" value="Delete File(s)">
+      <input type="button" id="kwpass-file" value="Choose File(s)" title="Provide the database file and key file (*.key*)(optional)">
     </div>
     <input type="radio" name="method" id="none">
     <label for="none">Do not attach to a back-end. Use "<a target="_blank" data-href="faq19">Secure Synced Storage</a>" only.</label>
@@ -94,139 +76,69 @@
   <div class="m2">
     <p>To set up a keyboard shortcut for opening the popup window in Chromium browsers, go to "chrome://extensions/shortcuts" in a new tab. The term "Meta" refers to modifier keys like Ctrl, Alt, Command, or their combinations.</p>
     <div data-shortcut="copy">
-      <span>Copy Username (
-        <select>
-          <option value="click">Click</option>
-          <option value="ctrl-click">Ctrl + Click</option>
-        </select>
-        on <b>Copy</b> button)
-      </span>
+      <span>Copy Username (<u>KeyC</u>)</span>
       <div>
-        <input type="text" placeholder="KeyC" list="keys" pattern="^\w+$">
-        <label>Shift <input type="checkbox"></label>
-        <label>Meta <input type="checkbox"></label>
-      </div>
-    </div>
-    <div data-shortcut="password">
-      <span>Copy Password (
-        <select>
-          <option value="ctrl-click">Ctrl + Click</option>
-          <option value="click">Click</option>
-        </select>
-        on <b>Copy</b> button)
-      </span>
-      <div>
-        <input type="text" placeholder="KeyX" list="keys" pattern="^\w+$">
-        <label>Shift <input type="checkbox"></label>
-        <label>Meta <input type="checkbox"></label>
-      </div>
-    </div>
-    <div data-shortcut="insert-both">
-      <span>Insert Username and Password, then Submit (
-        <select>
-          <option value="click">Click</option>
-          <option value="ctrl-click">Ctrl + Click</option>
-        </select>
-        on <b>Both</b> button)
-      </span>
-      <div>
-        <input type="text" placeholder="KeyB" list="keys" pattern="^\w+$">
-        <label>Shift <input type="checkbox"></label>
-        <label>Meta <input type="checkbox"></label>
-      </div>
-    </div>
-    <div data-shortcut="insert-both-no-submit">
-      <span>Insert Username and Password (
-        <select>
-          <option value="ctrl-click">Ctrl + Click</option>
-          <option value="click">Click</option>
-        </select>
-        on <b>Both</b> button)
-      </span>
-      <div>
-        <input type="text" placeholder="KeyB" list="keys" pattern="^\w+$">
-        <label>Shift <input type="checkbox"></label>
-        <label>Meta <input type="checkbox"></label>
-      </div>
-    </div>
-    <div data-shortcut="insert-login">
-      <span>Insert Username</span>
-      <div>
-        <input type="text" placeholder="KeyU" list="keys" pattern="^\w+$">
-        <label>Shift <input type="checkbox"></label>
-        <label>Meta <input type="checkbox"></label>
-      </div>
-    </div>
-    <div data-shortcut="insert-password">
-      <span>Insert Password</span>
-      <div>
-        <input type="text" placeholder="KeyP" list="keys" pattern="^\w+$">
         <label>Shift <input type="checkbox"></label>
         <label>Meta <input type="checkbox"></label>
       </div>
     </div>
     <div data-shortcut="otp">
-      <span>Copy OTP</span>
+      <span>Copy OTP (<u>KeyO</u>)</span>
       <div>
-        <input type="text" placeholder="KeyO" list="keys" pattern="^\w+$">
+        <label>Shift <input type="checkbox"></label>
+        <label>Meta <input type="checkbox"></label>
+      </div>
+    </div>
+    <div data-shortcut="password">
+      <span>Copy Password (<u>KeyX</u>)</span>
+      <div>
+        <label>Shift <input type="checkbox"></label>
+        <label>Meta <input type="checkbox"></label>
+      </div>
+    </div>
+    <div data-shortcut="insert-both">
+      <span>Insert Username and Password, then Submit (<u>KeyB</u>)</span>
+      <div>
+        <label>Shift <input type="checkbox"></label>
+        <label>Meta <input type="checkbox"></label>
+      </div>
+    </div>
+    <div data-shortcut="insert-both-no-submit">
+      <span>Insert Username and Password (<u>KeyB</u>)</span>
+      <div>
+        <label>Shift <input type="checkbox"></label>
+        <label>Meta <input type="checkbox"></label>
+      </div>
+    </div>
+    <div data-shortcut="insert-login">
+      <span>Insert Username (<u>KeyU</u>)</span>
+      <div>
+        <label>Shift <input type="checkbox"></label>
+        <label>Meta <input type="checkbox"></label>
+      </div>
+    </div>
+    <div data-shortcut="insert-password">
+      <span>Insert Password (<u>KeyP</u>)</span>
+      <div>
         <label>Shift <input type="checkbox"></label>
         <label>Meta <input type="checkbox"></label>
       </div>
     </div>
     <div data-shortcut="search">
-      <span>Focus Search</span>
+      <span>Focus Search (<u>KeyF</u>)</span>
       <div>
-        <input type="text" placeholder="KeyF" list="keys" pattern="^\w+$">
-        <label>Shift <input type="checkbox"></label>
-        <label>Meta <input type="checkbox"></label>
-      </div>
-    </div>
-    <div data-shortcut="passkey">
-      <span>Use Passkey</span>
-      <div>
-        <input type="text" placeholder="KeyK" list="keys" pattern="^\w+$">
         <label>Shift <input type="checkbox"></label>
         <label>Meta <input type="checkbox"></label>
       </div>
     </div>
     <div data-shortcut="ssdb">
-      <span>Open Secure Synced Storage</span>
+      <span>Open Secure Synced Storage (<u>KeyD</u>)</span>
       <div>
-        <input type="text" placeholder="KeyD" list="keys" pattern="^\w+$">
         <label>Shift <input type="checkbox"></label>
         <label>Meta <input type="checkbox"></label>
       </div>
     </div>
   </div>
-
-  <datalist id="keys">
-    <option value="KeyA"></option>
-    <option value="KeyB"></option>
-    <option value="KeyC"></option>
-    <option value="KeyD"></option>
-    <option value="KeyE"></option>
-    <option value="KeyF"></option>
-    <option value="KeyG"></option>
-    <option value="KeyH"></option>
-    <option value="KeyI"></option>
-    <option value="KeyJ"></option>
-    <option value="KeyK"></option>
-    <option value="KeyL"></option>
-    <option value="KeyM"></option>
-    <option value="KeyN"></option>
-    <option value="KeyO"></option>
-    <option value="KeyP"></option>
-    <option value="KeyQ"></option>
-    <option value="KeyR"></option>
-    <option value="KeyS"></option>
-    <option value="KeyT"></option>
-    <option value="KeyU"></option>
-    <option value="KeyV"></option>
-    <option value="KeyW"></option>
-    <option value="KeyX"></option>
-    <option value="KeyY"></option>
-    <option value="KeyZ"></option>
-  </datalist>
 
   <h2>Secure Synced Storage</h2>
   <div>
@@ -254,7 +166,7 @@
   </div>
 
   <p class="fl">
-    <button id="all-frames" title="Grant permissions needed for accessing cross-origin iframe elements in the active tab. This is useful if a login dialog is not on the same origin as the website itself (e.g.: https://www.aliexpress.com/)" value="direct">Access Remote Frames Permission</button>
+    <button id="all-frames" title="Grant permissions needed for accessing cross-origin iframe elements in the active tab. This is useful if a login dialog is not on the same origin as the website itself (e.g.: https://www.aliexpress.com/)">Access Remote Frames Permission</button>
     <button id="usage">YouTube Preview</button>
     <button id="rate">Rate Me</button>
   </p>
@@ -265,9 +177,9 @@
     <span id="toast"></span>
   </p>
 
-  <script src="/connect/kdbxweb/kdbxweb.js"></script>
-  <script src="/tools/tld.js"></script>
-  <script src="/connect/kdbxweb/connect.js"></script>
-  <script src="index.js"></script>
+<script src="/connect/kdbxweb/kdbxweb.js"></script>
+<script src="/tools/tld.js"></script>
+<script src="/connect/kdbxweb/connect.js"></script>
+<script src="index.js"></script>
 </body>
 </html>

@@ -1,9 +1,3 @@
-/* global passkey */
-
-if (typeof importScripts !== 'undefined') {
-  self.importScripts('/data/passkey/passkey.create.js');
-}
-
 const current = () => chrome.tabs.query({
   lastFocusedWindow: true,
   active: true,
@@ -18,7 +12,7 @@ const current = () => chrome.tabs.query({
   return tbs[0];
 });
 
-const notify = async (tab, e, badge = 'E', color = '#d93025', timeout) => {
+const notify = async (tab, e, badge = 'E', color = '#d93025') => {
   tab = tab || await current();
 
   chrome.action.setBadgeText({
@@ -35,12 +29,10 @@ const notify = async (tab, e, badge = 'E', color = '#d93025', timeout) => {
   });
 
   clearTimeout(notify.id);
-  if (timeout > 0) {
-    notify.id = setTimeout(() => chrome.action.setBadgeText({
-      tabId: tab.id,
-      text: ''
-    }), timeout);
-  }
+  notify.id = setTimeout(() => chrome.action.setBadgeText({
+    tabId: tab.id,
+    text: ''
+  }), 3000);
 };
 
 // eslint-disable-next-line no-unused-vars
@@ -66,7 +58,7 @@ const copy = async (content, tab) => {
   // Firefox
   try {
     await navigator.clipboard.writeText(content);
-    notify(undefined, 'Done', '✓', 'green', 3000);
+    notify(undefined, 'Done', '✓', 'green');
   }
   catch (e) {
     try {
@@ -79,15 +71,13 @@ const copy = async (content, tab) => {
             cmd: 'notify',
             message: 'Done',
             badge: '✓',
-            color: 'green',
-            timeout: 3000
+            color: 'green'
           })).catch(() => chrome.runtime.sendMessage({
             cmd: 'copy-interface',
             password
           }));
         },
-        args: [content],
-        injectImmediately: true
+        args: [content]
       });
     }
     catch (e) {
@@ -126,44 +116,11 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         catch (e) {
           document.activeElement.focus();
         }
-      },
-      injectImmediately: true
-    });
-  }
-  else if (request.cmd === 'passkey-interface') {
-    const {persist, features, key} = passkey.set.args.get(sender.tab.id);
-    // clean up
-    try {
-      chrome.tabs.onUpdated.removeListener(persist);
-
-      passkey.args.delete(sender.tab.id);
-    }
-    catch (e) {}
-
-    // show interface
-    chrome.windows.getCurrent().then(win => {
-      const args = new URLSearchParams();
-
-      if (features['backed-up']) {
-        request.data.FLAGS.push('BS');
       }
-      request.data.PRIVATE_KEY_PEM = key;
-
-      args.set('data', JSON.stringify(request.data, undefined, '  ').replaceAll('\\\\n', '\\n'));
-      args.set('href', sender.tab.url);
-
-      chrome.windows.create({
-        url: '/data/passkey/index.html?' + args.toString(),
-        width: 700,
-        height: 800,
-        left: win.left + Math.round((win.width - 400) / 2),
-        top: win.top + Math.round((win.height - 300) / 2),
-        type: 'popup'
-      });
     });
   }
   else if (request.cmd === 'notify') {
-    notify(undefined, request.message, request.badge, request.color, request.timeout);
+    notify(undefined, request.message, request.badge, request.color);
   }
   else if (request.cmd === 'copy-interface') {
     copy.interface(request.password);
@@ -191,28 +148,10 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       title: 'Generate a Random Password',
       contexts: ['action']
     }, () => chrome.runtime.lastError);
-
     chrome.contextMenus.create({
       id: 'save-form',
       title: 'Save a new Login Form in KeePass',
       contexts: ['action']
-    }, () => chrome.runtime.lastError);
-    chrome.contextMenus.create({
-      id: 'passkey',
-      title: 'Passkey Generation (Beta)',
-      contexts: ['action']
-    }, () => chrome.runtime.lastError);
-    chrome.contextMenus.create({
-      id: 'generate-passkey',
-      title: 'Intercept',
-      contexts: ['action'],
-      parentId: 'passkey'
-    }, () => chrome.runtime.lastError);
-    chrome.contextMenus.create({
-      id: 'generate-passkey:backed-up',
-      title: 'Intercept + Backup Verify',
-      contexts: ['action'],
-      parentId: 'passkey'
     }, () => chrome.runtime.lastError);
     chrome.contextMenus.create({
       id: 'auto-login',
@@ -221,38 +160,26 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       enabled: false
     }, () => chrome.runtime.lastError);
     chrome.contextMenus.create({
-      id: 'extra',
-      title: 'Extra',
-      contexts: ['action']
-    }, () => chrome.runtime.lastError);
-    chrome.contextMenus.create({
       id: 'encrypt-data',
       title: 'Encrypt or Decrypt a String',
-      contexts: ['action'],
-      parentId: 'extra'
-    }, () => chrome.runtime.lastError);
-    chrome.contextMenus.create({
-      id: 'open-keyboards',
-      title: 'Keyboard Shortcut Settings',
-      contexts: ['action'],
-      parentId: 'extra'
+      contexts: ['action']
     }, () => chrome.runtime.lastError);
     chrome.contextMenus.create({
       id: 'lock-secure-synced-storage',
       title: 'Lock Secure Synced Storage',
-      contexts: ['action'],
-      parentId: 'extra'
-    }, () => chrome.runtime.lastError);
-    chrome.contextMenus.create({
-      id: 'lock-kwpass',
-      title: 'Lock Internal Database',
-      contexts: ['action'],
-      parentId: 'extra'
+      contexts: ['action']
     }, () => chrome.runtime.lastError);
     if (/Firefox/.test(navigator.userAgent)) {
       chrome.contextMenus.create({
         id: 'open-options',
         title: 'Open Options Page',
+        contexts: ['action']
+      }, () => chrome.runtime.lastError);
+    }
+    else {
+      chrome.contextMenus.create({
+        id: 'open-keyboards',
+        title: 'Keyboard Shortcut Settings',
         contexts: ['action']
       }, () => chrome.runtime.lastError);
     }
@@ -263,15 +190,7 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
 const onCommand = async (info, tab) => {
   tab = tab || await current();
 
-  if (info.menuItemId === 'generate-passkey' || info.menuItemId === 'generate-passkey:backed-up') {
-    passkey.set(tab.id, {
-      'backed-up': info.menuItemId === 'generate-passkey:backed-up'
-    }).catch(e => {
-      console.warn(e);
-      notify(tab, e);
-    });
-  }
-  else if (info.menuItemId === 'save-form') {
+  if (info.menuItemId === 'save-form') {
     const target = {
       tabId: tab.id
     };
@@ -282,8 +201,7 @@ const onCommand = async (info, tab) => {
           ...target,
           allFrames: true
         },
-        files: ['/data/helper.js'],
-        injectImmediately: true
+        files: ['/data/helper.js']
       });
 
       // collect logins
@@ -310,8 +228,7 @@ const onCommand = async (info, tab) => {
               passwords
             };
           });
-        },
-        injectImmediately: true
+        }
       });
 
       const pairs = r.map(o => o.result).flat().filter(a => a);
@@ -321,8 +238,7 @@ const onCommand = async (info, tab) => {
         func: pairs => {
           window.pairs = pairs;
         },
-        args: [pairs],
-        injectImmediately: true
+        args: [pairs]
       });
 
       await chrome.scripting.insertCSS({
@@ -331,8 +247,7 @@ const onCommand = async (info, tab) => {
       });
       await chrome.scripting.executeScript({
         target,
-        files: ['/data/save/inject.js'],
-        injectImmediately: true
+        files: ['/data/save/inject.js']
       });
     }
     catch (e) {
@@ -359,8 +274,7 @@ const onCommand = async (info, tab) => {
       });
       await chrome.scripting.executeScript({
         target,
-        files: ['/data/safe/inject.js'],
-        injectImmediately: true
+        files: ['/data/safe/inject.js']
       });
     }
     catch (e) {
@@ -425,8 +339,7 @@ const onCommand = async (info, tab) => {
 
 This username must exactly correspond to one of the credentials stored in your KeePass database for this URL.`, value);
               },
-              args: [o?.username || ''],
-              injectImmediately: true
+              args: [o?.username || '']
             });
             if (r[0].result) {
               if (o) {
@@ -466,8 +379,7 @@ This username must exactly correspond to one of the credentials stored in your K
       });
       await chrome.scripting.executeScript({
         target,
-        files: ['/data/embedded/inject.js'],
-        injectImmediately: true
+        files: ['/data/embedded/inject.js']
       });
     }
     catch (e) {
@@ -477,9 +389,6 @@ This username must exactly correspond to one of the credentials stored in your K
   }
   else if (info.menuItemId === 'lock-secure-synced-storage') {
     chrome.storage.session.remove('ssdb-exported-key');
-  }
-  else if (info.menuItemId === 'lock-kwpass') {
-    chrome.storage.session.remove('kw:password');
   }
 };
 chrome.contextMenus.onClicked.addListener(onCommand);

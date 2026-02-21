@@ -25,10 +25,10 @@ engine.otp = string => {
 };
 
 engine.asyncOTP = uuid => {
-  if ('get-totp' in engine.core) {
+  if (engine.core['get-totp']) {
     return engine.core['get-totp'](uuid);
   }
-  return Promise.resolve('');
+  return Promise.resolve();
 };
 
 // eslint-disable-next-line no-unused-vars
@@ -63,10 +63,10 @@ engine.prepare = type => {
         return [];
       }
       async 'set-login'() {
-        throw Error('NO_BACK_END');
+        throw Error('Not_Supported');
       }
       async 'get-totp'() {
-        throw Error('NO_BACK_END');
+        throw Error('Not_Supported');
       }
       async search() {
         return {
@@ -74,7 +74,7 @@ engine.prepare = type => {
         };
       }
       async set() {
-        throw Error('NO_BACK_END');
+        throw Error('Not_Supported');
       }
     };
   }
@@ -106,8 +106,7 @@ engine.search = async query => {
       for (const uuid of uuids) {
         const r = await engine.ssdb.find(uuid, undefined, (failed, succeeded, total) => {
           if (succeeded === 0 && total !== 0 && failed) {
-            document.getElementById('notify')
-              .notify('Unable to decrypt entries in secure storage. Incorrect password?', 'warning', 3000);
+            document.getElementById('notify').notify('Unable to decrypt entries in secure storage. Incorrect password?', 'warning', 3000);
           }
           else if (failed) {
             console.info(
@@ -117,11 +116,10 @@ engine.search = async query => {
           }
         });
         for (const o of r) {
-          o.from = 'ssdb';
+          o.ssdb = true;
           o.href = query.url;
           o.group = '[Synced Storage]';
-          o.Name = o.Name || '';
-          o.uuid = o.uuid || '';
+          o.Name = '';
 
           rs.push(o);
         }

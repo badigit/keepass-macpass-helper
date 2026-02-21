@@ -47,10 +47,6 @@ document.addEventListener('click', e => {
       alert(e.message);
     }
   }
-  else if (cmd === 'update-title') {
-    const input = target.parentElement.querySelector('input[type="text"]');
-    input.value = args.get('title');
-  }
 });
 
 document.addEventListener('submit', e => {
@@ -71,15 +67,17 @@ document.addEventListener('submit', e => {
     try {
       await engine.prepare(prefs.engine);
 
+      if (prefs.engine === 'kwpass') {
+        await engine.core.open(prompt('Password to unlock the database?'));
+      }
+
       if (e.submitter.dataset.cmd == 'ssdb') {
         if (engine.ssdb) {
           const uuid = (await engine.ssdb.convert(query.url)).at(0);
-
           await engine.ssdb.append(uuid, {
             'Url': query.url,
             'SubmitUrl': query.url.submiturl,
             'Login': query.login,
-            'Name': query.name,
             'Password': query.password
           });
         }
@@ -89,46 +87,6 @@ document.addEventListener('submit', e => {
         }
       }
       else {
-        if (prefs.engine === 'kwpass') {
-          // find password from session storage or ask from user
-          const ps = await chrome.storage.session.get({
-            'kw:password': ''
-          }) || {};
-
-          let password;
-          if (ps['kw:password']) {
-            password = ps['kw:password'];
-          }
-          else {
-            const dialog = document.getElementById('prompt');
-            dialog.showModal();
-            dialog.querySelector('input[type=password]').value = '';
-
-            password = await new Promise(resolve => {
-              dialog.oncancel = e => {
-                e.preventDefault();
-                resolve('');
-              };
-              dialog.querySelector('input[type=button]').onclick = e => {
-                resolve('');
-              };
-              dialog.querySelector('form').onsubmit = e => {
-                e.preventDefault();
-                e.stopPropagation();
-                resolve(dialog.querySelector('input[type=password]').value);
-              };
-            });
-            dialog.close();
-          }
-
-          if (password) {
-            await engine.core.open(password);
-          }
-          else {
-            b.disabled = false;
-            return;
-          }
-        }
         await engine.set(query);
       }
 
@@ -178,9 +136,6 @@ start();
 
 addEventListener('keydown', e => {
   if (e.code === 'Escape') {
-    if (e.target.closest('#prompt')) {
-      return;
-    }
     document.querySelector('[data-cmd="cancel"]').click();
   }
 });

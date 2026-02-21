@@ -9,9 +9,7 @@ class Safe {
 
   #buffer(string) {
     const bytes = new Uint8Array(string.length);
-    for (let i = 0; i < string.length; i++) {
-      bytes[i] = string.charCodeAt(i);
-    }
+    [...string].forEach((c, i) => bytes[i] = c.charCodeAt(0));
     return bytes;
   }
 
@@ -54,14 +52,14 @@ class Safe {
     // compatibility fix
     string = string.replace('data:application/octet-binary;base64,', '');
 
-    const bytes = this.#buffer(atob(string));
+    const iv = crypto.getRandomValues(new Uint8Array(16));
 
     const result = await crypto.subtle.decrypt({
       name: 'AES-CBC',
-      iv: bytes.slice(0, 16) // use the stored iv
-    }, this.#key, bytes.slice(16));
+      iv
+    }, this.#key, this.#buffer(atob(string)));
 
-    const ab = (new Uint8Array(result));
+    const ab = (new Uint8Array(result)).subarray(16);
     return this.#decoder.decode(ab);
   }
 }

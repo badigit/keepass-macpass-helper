@@ -1,11 +1,9 @@
-/* global engine, Safe, passkey */
+/* global engine, Safe */
 'use strict';
 
 const list = document.getElementById('list');
 const search = document.querySelector('input[type=search]');
-search.onkeydown = e => e.stopPropagation();
 const psbox = document.getElementById('password-needed');
-psbox.onkeydown = e => e.stopPropagation();
 
 // can I use allFames or chrome.scripting fails?
 let allFrames = true;
@@ -16,22 +14,33 @@ let usernames = [];
 
 const timebased = {
   words: {
-    otp: ['KPH: otp', 'KPH:otp', 'otp'],
+    otp: ['KPH: otp', 'KPH:otp', 'otp', 'KPOTP'],
     sotp: ['KPH: sotp', 'KPH:sotp', 'sotp'],
     botp: ['TimeOtp-Secret-Base32']
   },
   includes(o) {
     const {stringFields = []} = o;
+
+    // Отладочное логирование
+    console.log('OTP Debug - Проверяю запись:', o.name || o.Name);
+    console.log('OTP Debug - StringFields:', stringFields);
+    console.log('OTP Debug - UUID:', o.uuid);
+
     if (o) {
       const b = stringFields.some(o => timebased.words.otp.includes(o.Key)) ||
         stringFields.some(o => timebased.words.sotp.includes(o.Key)) ||
         stringFields.some(o => timebased.words.botp.includes(o.Key));
 
+      console.log('OTP Debug - Найдены поля OTP/SOTP/BOTP:', b);
+
       if (b) {
         return Promise.resolve(true);
       }
       if (o.uuid) {
-        return engine.asyncOTP(o.uuid).then(totp => totp !== '');
+        return engine.asyncOTP(o.uuid).then(totp => {
+          console.log('OTP Debug - engine.asyncOTP результат:', totp);
+          return totp !== '';
+        });
       }
     }
     return Promise.resolve(false);
@@ -39,8 +48,14 @@ const timebased = {
   async get(o) {
     const {stringFields} = o;
 
+    console.log('OTP Debug GET - Запись:', o.name || o.Name);
+    console.log('OTP Debug GET - StringFields:', stringFields);
+
     const otp = stringFields.filter(o => timebased.words.otp.includes(o.Key)).shift();
     const sotp = stringFields.filter(o => timebased.words.sotp.includes(o.Key)).shift();
+
+    console.log('OTP Debug GET - Найдено OTP поле:', otp);
+    console.log('OTP Debug GET - Найдено SOTP поле:', sotp);
 
     if (sotp) {
       return await engine.otp(await decrypt(sotp.Value));
@@ -54,6 +69,8 @@ const timebased = {
     const period = stringFields.filter(o => ['TimeOtp-Period'].includes(o.Key)).shift();
     const digits = stringFields.filter(o => ['TimeOtp-Length'].includes(o.Key)).shift();
 
+    console.log('OTP Debug GET - Встроенный KeePass OTP:', {secret, period, digits});
+
     if (secret) {
       const args = new URLSearchParams();
       args.set('secret', secret.Value);
@@ -66,10 +83,12 @@ const timebased = {
     if (o.uuid) {
       const v = engine.asyncOTP(o.uuid);
       if (v) {
+        console.log('OTP Debug GET - asyncOTP результат:', v);
         return v;
       }
     }
 
+    console.log('OTP Debug GET - OTP не найден');
     throw Error(Error('NO_OTP_Provided'));
   }
 };
@@ -174,10 +193,9 @@ function add(o, select = false) {
     title: o.Login || '',
     password: o.Password,
     stringFields: o.StringFields,
-    from: o.from,
     uuid: o.uuid, // for KeePassXC's built-in OTP
-    href: o.href, // for internal secure storage
-    query: o.query // for updating entry later
+    ssdb: o.ssdb, // for internal secure storage
+    href: o.href // for internal secure storage
   }, {
     name: o.Name || '',
     part: 'name'
@@ -219,18 +237,15 @@ function error(e) {
 
 async function submit() {
   let query = search.value = search.value || url;
-  let url = query;
-  if (query.includes('://')) {
-    // if query is a URL we just search for the URL
-    query = undefined;
-  }
-  else {
+  if (query.indexOf('://') === -1) {
     try {
       // try to construct and validate URL from user input
-      url = new URL('https://' + query).href;
+      new URL('https://' + query);
+      search.value = query = 'https://' + query;
     }
     catch (e) {}
   }
+
   list.clear();
 
   [...document.getElementById('toolbar').querySelectorAll('input,button')].forEach(input => {
@@ -238,22 +253,17 @@ async function submit() {
   });
 
   try {
-    const q = {
-      url,
-      query
-    };
-    const response = await engine.search(q);
+    const response = await engine.search({
+      url: query
+    });
 
     // hide group and title columns if no data available
     document.getElementById('group').setAttribute('width', response.Entries.some(o => o.group) ? '1fr' : '0');
     document.getElementById('title').setAttribute('width', response.Entries.some(o => o.Name) ? '1fr' : '0');
     if (response.Entries.length === 0) {
-      const {option} = list.add([{
-        name: 'No credential for this page!',
-        part: 'login'
-      }], undefined, undefined, true);
-      option.disabled = true;
-      list.focus();
+      add({
+        Login: 'No credential for this page!'
+      }, true);
     }
     else {
       submit.populated = false;
@@ -302,7 +312,6 @@ async function submit() {
       }
       // add
       for (const o of response.Entries) {
-        o.query = q;
         const b = list.value ? false : (
           ('Name' in selected) ? (selected.Login === o.Login && selected.Name === o.Name) : (selected.Login === o.Login)
         );
@@ -355,34 +364,21 @@ document.addEventListener('search', submit);
     [...document.getElementById('toolbar').querySelectorAll('input, button')]
       .forEach(input => input.disabled = disabled);
 
-    // Only has username
-    if (target.selectedValues[0] && target.selectedValues[0][0].name) {
-      document.querySelector('#toolbar [data-cmd="insert-login"]').disabled = false;
-      document.querySelector('#toolbar [data-cmd="copy"]').disabled = false;
-    }
-
     const o = e.target.selectedValues[0];
     // otp
     document.querySelector('#toolbar [data-cmd="otp"]').disabled = true;
     if (o && o[0]) {
       if (lastO !== o[0]) {
         lastO = o[0];
+
         timebased.includes(o[0]).then(b => {
           document.querySelector('#toolbar [data-cmd="otp"]').disabled = b === false;
         });
       }
     }
-    // passkey
-    document.querySelector('#toolbar [data-cmd="passkey"]').disabled = true;
-    if (o && o[0] && o[0].stringFields) {
-      document.querySelector('#toolbar [data-cmd="passkey"]').disabled = o[0].stringFields.some(o => {
-        return o.Key.startsWith('PASSKEY_STORAGE') || o.Key === 'KPEX_PASSKEY_PRIVATE_KEY_PEM';
-      }) === false;
-    }
-
     // remove
-    document.querySelector('#toolbar [data-cmd="delete"]').disabled = !e.target.selectedValues.length ||
-      e.target.selectedValues.some(o => o && ['ssdb', 'kwpass'].includes(o[0]?.from)) === false;
+    document.querySelector('#toolbar [data-cmd="delete"]').disabled =
+      !e.target.selectedValues.length || e.target.selectedValues.every(o => o && o[0]?.ssdb === true) === false;
   });
 }
 
@@ -607,25 +603,18 @@ const copy = content => navigator.clipboard.writeText(content).then(() => {
     cmd: 'notify',
     message: 'Done',
     badge: '✓',
-    color: 'green',
-    timeout: 3000
+    color: 'green'
   }, () => window.close());
 }).catch(e => alert(e.message));
 
 document.addEventListener('click', async e => {
   try {
     const target = e.target;
-    // dispatch event still works on disabled elements
-    if (target.disabled) {
-      return;
-    }
-
     const cmd = target.dataset.cmd || '';
-    // for mouse click, any modifier counts
-    const alt = e.metaKey || e.ctrlKey || e.shiftKey;
+    const alt = e.metaKey || e.ctrlKey;
 
     // cache
-    if (cmd && (cmd.startsWith('insert-') || cmd.startsWith('copy') || cmd === 'passkey')) {
+    if (cmd && (cmd.startsWith('insert-') || cmd.startsWith('copy'))) {
       cookie.set(list);
     }
     //
@@ -682,52 +671,18 @@ document.addEventListener('click', async e => {
             cmd: 'notify',
             message: `Cannot find any login forms on this page!
 
-For cross-origin login forms, use the options page to permit access`
+  For cross-origin login forms, use the options page to permit access`
           });
         }
       }
       // submit
-      if (cmd === 'insert-both' && inserted) {
-        let type;
-        if (e.detail === 'submit') {
-          type = 'submit';
-        }
-        else if (e.detail === 'no-submit') {
-          type = 'no-submit';
-        }
-        else {
-          if (alt === false) {
-            type = self.keys['insert-both'].click === 'click' ? 'submit' : 'no-submit';
-          }
-          else {
-            type = self.keys['insert-both-no-submit'].click === 'ctrl-click' ? 'no-submit' : 'submit';
-          }
-        }
-
-        if (type === 'submit') {
-          await insert.submit();
-        }
+      if (cmd === 'insert-both' && alt === false && inserted) {
+        await insert.submit();
       }
       window.close();
     }
     else if (cmd && cmd.startsWith('copy')) {
-      let type = 'username';
-      if (e.detail === 'copy') {
-        type = 'username';
-      }
-      else if (e.detail === 'password') {
-        type = 'password';
-      }
-      else {
-        if (alt) {
-          type = self.keys.password.click === 'ctrl-click' ? 'password' : 'username';
-        }
-        else {
-          type = self.keys.copy.click === 'click' ? 'username' : 'password';
-        }
-      }
-
-      if (type === 'password') {
+      if (e.detail === 'password' || alt) {
         copy(list.selectedValues.map(a => a[0].password).join('\n'));
       }
       else {
@@ -744,9 +699,9 @@ For cross-origin login forms, use the options page to permit access`
           await copy(s);
         }
         else {
-          alert(`No string-field entry with either "otp" or "sotp" key is detected.
+          alert(`No string-field entry with either "otp", "KPOTP" or "sotp" key is detected.
 
-To generate one-time password tokens, save a new string-field entry with "KPH: otp" name and SECRET as value.`);
+  To generate one-time password tokens, save a new string-field entry with "KPOTP" or "KPH: otp" name and SECRET as value.`);
         }
       }
       catch (e) {
@@ -754,96 +709,20 @@ To generate one-time password tokens, save a new string-field entry with "KPH: o
         alert(e.message || 'cannot decrypt');
       }
     }
-    else if (cmd === 'passkey') {
-      try {
-        const checked = list.selectedValues[0][0];
-        const data = checked.stringFields.filter(o => o.Key.startsWith('PASSKEY_STORAGE'));
-        // Append KeePassXC style passkey;
-        if (checked.stringFields.some(o => o.Key === 'KPEX_PASSKEY_PRIVATE_KEY_PEM')) {
-          try {
-            const id = checked.stringFields.filter(o => o.Key === 'KPEX_PASSKEY_CREDENTIAL_ID').shift().Value;
-            // duplication check
-            if (data.some(o => o.CREDENTIAL_ID === id) === false) {
-              data.push({
-                Key: 'KeePassXC',
-                Value: JSON.stringify({
-                  PRIVATE_KEY_PEM: checked.stringFields
-                    .filter(o => o.Key === 'KPEX_PASSKEY_PRIVATE_KEY_PEM').shift().Value,
-                  CREDENTIAL_ID: id,
-                  RELYING_PARTY: checked.stringFields.filter(o => o.Key === 'KPEX_PASSKEY_RELYING_PARTY').shift().Value,
-                  USER_HANDLE: checked.stringFields.filter(o => o.Key === 'KPEX_PASSKEY_USER_HANDLE').shift().Value,
-                  USERNAME: checked.stringFields.filter(o => o.Key === 'KPEX_PASSKEY_USERNAME').shift().Value
-                }).replaceAll('\\\\n', '\\n')
-              });
-            }
-          }
-          catch (e) {
-            console.error(e);
-          }
-        }
-
-        let selectedData = data[0];
-        if (data.length > 1) {
-          const r = prompt('Which passkey would you like to use?\n\n' + data.map((o, n) => {
-            return (n + 1) + ': ' + o.Key;
-          }).join('\n'), 1);
-
-          if (!r) {
-            return;
-          }
-          if (isNaN(r)) {
-            return;
-          }
-          selectedData = data[Number(r) - 1];
-          if (!selectedData) {
-            return;
-          }
-        }
-
-        const json = JSON.parse(selectedData.Value);
-        await passkey.get(json);
-        await chrome.runtime.sendMessage({
-          cmd: 'notify',
-          message: 'Proceed passkey login on the page',
-          badge: '🔐',
-          color: 'green'
-        });
-        window.close();
-      }
-      catch (e) {
-        console.warn(e);
-        alert(e.message);
-      }
-    }
     else if (cmd === 'options-page') {
       chrome.runtime.openOptionsPage();
     }
     else if (cmd === 'delete') {
       const entries = list.selectedValues;
-      if (confirm(`Are you sure you want to remove ${entries.length} item(s) from secure or internal storage?`)) {
-        // kwpass
-        {
-          const uuids = entries.filter(e => e[0].from === 'kwpass').map(e => e[0].uuid);
-
-          if (uuids.length) {
-            await engine.core.remove(uuids);
+      if (confirm(`Are you sure you want to remove ${entries.length} item(s) from the secure synced storage?`)) {
+        engine.ssdb.convert(entries[0][0].href).then(async uuids => {
+          for (const uuid of uuids) {
+            await engine.ssdb.remove(uuid, e => {
+              return entries.filter(a => a[0].name === e.Login && a[0].password === e.Password).length === 0;
+            });
           }
-        }
-        // ssdb (in future we can use entry.uuid for deletion)
-        {
-          for (const entry of entries) {
-            const o = entry[0];
-            if (o.from === 'ssdb') {
-              const uuids = await engine.ssdb.convert(o.href);
-              for (const uuid of uuids) {
-                await engine.ssdb.remove(uuid, e => {
-                  return entries.filter(a => a[0].name === e.Login && a[0].password === e.Password).length === 0;
-                });
-              }
-            }
-          }
-        }
-        location.reload();
+          location.reload();
+        });
       }
     }
 
@@ -914,13 +793,7 @@ const access = () => new Promise(resolve => chrome.storage.local.get({
       });
       psbox.classList.add('hidden');
 
-      try {
-        await engine.core.open(password);
-      }
-      catch (e) { // delete wrong password
-        await chrome.storage.session.remove('kw:password');
-        throw Error(e);
-      }
+      await engine.core.open(password);
 
       chrome.storage.session.set({
         'kw:password': password
