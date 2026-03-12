@@ -193,30 +193,16 @@ document.getElementById('usage').addEventListener('click', () => chrome.tabs.cre
 document.getElementById('check').addEventListener('click', () => {
   try {
     const url = document.getElementById('host').value;
-    const o = '*://' + (new URL(url)).hostname + '/';
-    chrome.permissions.request({
-      origins: [o]
-    }, granted => {
-      if (granted) {
-        fetch(url).then(() => toast('Looks Good')).catch(e => toast(e.message));
-      }
-      else {
-        toast('Permission is not granted');
-      }
-    });
+    new URL(url); // validate URL
+    fetch(url).then(() => toast('Looks Good')).catch(e => toast(e.message));
   }
   catch (e) {
     toast(e.message);
   }
 });
 
-document.getElementById('all-frames').addEventListener('click', () => chrome.permissions.request({
-  origins: ['<all_urls>']
-}));
+document.getElementById('all-frames').classList.add('hidden');
 // hide granted permissions
-chrome.permissions.contains({
-  origins: ['<all_urls>']
-}, granted => granted && document.getElementById('all-frames').classList.add('hidden'));
 chrome.permissions.contains({
   permissions: ['webNavigation'],
   origins: ['<all_urls>']

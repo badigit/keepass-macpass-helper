@@ -61,10 +61,11 @@ class SimpleListView extends HTMLElement {
           height: var(--height);
           line-height: var(--height);
         }
-        #parent > div,
+        #parent > div:not(#header) {
+          cursor: default;
+        }
         #parent > div > * {
           pointer-events: none;
-          z-index: 1;
         }
         ::slotted(*) {
           z-index: 2;
@@ -89,28 +90,20 @@ class SimpleListView extends HTMLElement {
           background-color: transparent;
           overflow: hidden;
           scrollbar-width: none;
-          color: transparent;
-          -webkit-text-fill-color: transparent;
+          opacity: 0;
+          pointer-events: none;
         }
         option {
-          box-sizing: border-box;
-          background-color: transparent;
-          text-indent: 200vw;
-          color: transparent !important;
-          -webkit-text-fill-color: transparent;
-          text-shadow: none !important;
           font: inherit;
           line-height: var(--height);
-          border-radius: 0;
           height: var(--height);
+          padding: 0;
         }
-        select[multiple]:focus option:checked {
-          background: var(--selected-bg) linear-gradient(0deg, var(--selected-bg) 0%,
-            var(--selected-bg) 500%);
+        #parent > div:not(#header).selected {
+          background-color: var(--selected-inactive-bg);
         }
-        select[multiple] option:checked {
-          background: var(--selected-inactive-bg) linear-gradient(0deg, var(--selected-inactive-bg) 0%,
-            var(--selected-inactive-bg) 500%);
+        :host(:focus-within) #parent > div:not(#header).selected {
+          background-color: var(--selected-bg);
         }
         :host([headers=false]) #header {
           display: none;
@@ -149,10 +142,10 @@ class SimpleListView extends HTMLElement {
     observer.observe(e, {attributes: true, childList: true, attributeFilter: ['width']});
   }
   #scrollIntoViewIfNeeded() {
-    const e = this.#select.options[this.#select.selectedIndex];
-    if (e) {
-      // e.scrollIntoViewIfNeeded(false);
-      if (this.#select.options[0] && this.#select.options[0].selected) {
+    const option = this.#select.options[this.#select.selectedIndex];
+    if (option?.div) {
+      const e = option.div;
+      if (this.#select.options[0]?.selected) {
         this.#parent.scrollTop = 0;
       }
       else if (e.offsetTop < this.#parent.scrollTop) {
@@ -161,6 +154,11 @@ class SimpleListView extends HTMLElement {
       else if (e.offsetTop + e.offsetHeight > this.#parent.scrollTop + this.#parent.offsetHeight) {
         e.scrollIntoView(false);
       }
+    }
+  }
+  #updateHighlights() {
+    for (const option of this.#select.options) {
+      option.div?.classList.toggle('selected', option.selected);
     }
   }
   #resize() {
@@ -234,9 +232,26 @@ class SimpleListView extends HTMLElement {
   connectedCallback() {
     this.#resize();
     this.#adjust();
+    // handle clicks on row divs instead of native select (fixes multi-select toggle bug)
+    this.#parent.addEventListener('click', e => {
+      const div = e.target.closest('div:not(#header)');
+      if (!div?.option) return;
+
+      if (e.ctrlKey || e.metaKey) {
+        div.option.selected = !div.option.selected;
+      }
+      else {
+        for (const opt of this.#select.options) {
+          opt.selected = opt === div.option;
+        }
+      }
+      this.#select.focus();
+      this.#emit(this.#select, 'change');
+    });
     // make sure selected option is visible
     this.#select.addEventListener('change', () => {
       this.#scrollIntoViewIfNeeded();
+      this.#updateHighlights();
 
       this.#emit(this, 'change');
     });

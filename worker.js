@@ -1,3 +1,22 @@
+// Polyfills for engine scripts that reference window
+self.window = self;
+self.KWPASS = class {
+  async prepare() {}
+  async search() { return { Entries: [] }; }
+  async set() { throw Error('Not_Supported'); }
+};
+self.kdbxweb = {};
+
+importScripts(
+  '/tools/tld.js',
+  '/connect/SecureSyncedDB.js',
+  '/connect/api.js',
+  '/connect/keepass/keepass.js',
+  '/connect/keepassxc/nacl-fast.min.js',
+  '/connect/keepassxc/keepassxc.js',
+  '/connect/totp.js'
+);
+
 const current = () => chrome.tabs.query({
   lastFocusedWindow: true,
   active: true,
@@ -52,6 +71,38 @@ const storage = { // used by "associate"
     catch (e) {}
   },
   remote: o => new Promise(resolve => chrome.storage.local.get(o, resolve))
+};
+
+// Hints engine — lazy init, search without passwords
+const hints = {
+  ready: false,
+  preparing: null,
+  async search(url) {
+    if (!this.ready) {
+      if (!this.preparing) {
+        this.preparing = (async () => {
+          const prefs = await storage.remote({engine: 'keepass'});
+          await engine.prepare(prefs.engine);
+          if (prefs.engine === 'keepass') {
+            await engine.core.test(false);
+          }
+          else if (prefs.engine === 'keepassxc') {
+            await engine.core['test-associate']();
+          }
+          this.ready = true;
+        })().catch(e => {
+          console.warn('hints engine:', e);
+        }).finally(() => {
+          this.preparing = null;
+        });
+      }
+      await this.preparing;
+    }
+    if (!this.ready) {
+      return {Entries: []};
+    }
+    return engine.search({url});
+  }
 };
 
 const copy = async (content, tab) => {
@@ -133,6 +184,90 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
     chrome.storage.session.get(request.prefs, response);
     return true;
   }
+  else if (request.cmd === 'hints-search') {
+    hints.search(request.url).then(r => {
+      const entries = (r.Entries || []).map((e, i) => ({
+        Login: e.Login || '',
+        Name: e.Name || '',
+        group: e.group || '',
+        originalIndex: i
+      }));
+      response({entries});
+    }).catch(e => {
+      console.warn('hints-search:', e);
+      response({entries: []});
+    });
+    return true;
+  }
+  else if (request.cmd === 'hints-fill') {
+    (async () => {
+      try {
+        const tab = sender.tab;
+        const r = await hints.search(request.url);
+        const entry = (r.Entries || [])[request.index];
+        if (!entry) {
+          return;
+        }
+        const username = entry.Login || '';
+        const password = entry.Password || '';
+
+        // Inject helper.js for detectForm
+        await chrome.scripting.executeScript({
+          target: {tabId: tab.id},
+          files: ['/data/helper.js']
+        });
+
+        // Fill credentials via executeScript — password never touches content script
+        await chrome.scripting.executeScript({
+          target: {tabId: tab.id},
+          func: (username, password) => {
+            const active = document.activeElement;
+            // Find the form context
+            const form = self.detectForm
+              ? self.detectForm(active)
+              : active.closest('form') || document;
+
+            // Fill username
+            const userFields = [
+              ...form.querySelectorAll('input[type=email]'),
+              ...form.querySelectorAll('input[type=text]')
+            ].filter(e => e.offsetParent);
+
+            if (username && userFields.length) {
+              const target = userFields.find(e => {
+                const hint = (e.name + e.id + (e.getAttribute('autocomplete') || '')).toLowerCase();
+                return /user|login|email|name|account/.test(hint);
+              }) || userFields[0];
+              target.focus();
+              document.execCommand('selectAll', false, '');
+              if (!document.execCommand('insertText', false, username)) {
+                target.value = username;
+              }
+              target.dispatchEvent(new Event('change', {bubbles: true}));
+              target.dispatchEvent(new Event('input', {bubbles: true}));
+            }
+
+            // Fill password
+            const pwFields = [...form.querySelectorAll('input[type=password]')]
+              .filter(e => e.offsetParent);
+            for (const e of pwFields) {
+              e.focus();
+              document.execCommand('selectAll', false, '');
+              if (!document.execCommand('insertText', false, password)) {
+                try { e.value = password; } catch (ex) {}
+              }
+              e.dispatchEvent(new Event('change', {bubbles: true}));
+              e.dispatchEvent(new Event('input', {bubbles: true}));
+            }
+          },
+          args: [username, password]
+        });
+      }
+      catch (e) {
+        console.warn('hints-fill:', e);
+      }
+    })();
+  }
 });
 
 // Context Menu
@@ -152,6 +287,11 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       id: 'save-form',
       title: 'Save a new Login Form in KeePass',
       contexts: ['action']
+    }, () => chrome.runtime.lastError);
+    chrome.contextMenus.create({
+      id: 'hints-open',
+      title: 'Show KeePass Suggestions',
+      contexts: ['editable']
     }, () => chrome.runtime.lastError);
     chrome.contextMenus.create({
       id: 'auto-login',
@@ -187,6 +327,32 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
   chrome.runtime.onInstalled.addListener(once);
   chrome.runtime.onStartup.addListener(once);
 }
+
+// Register hints content script
+{
+  const registerHints = async () => {
+    try {
+      try {
+        await chrome.scripting.unregisterContentScripts({ids: ['kp-hints']});
+      }
+      catch (e) {}
+      await chrome.scripting.registerContentScripts([{
+        id: 'kp-hints',
+        matches: ['<all_urls>'],
+        js: ['/data/hints/inject.js'],
+        runAt: 'document_idle',
+        allFrames: true
+      }]);
+    }
+    catch (e) {
+      console.warn('hints registration:', e);
+    }
+  };
+  chrome.runtime.onInstalled.addListener(registerHints);
+  chrome.runtime.onStartup.addListener(registerHints);
+  registerHints();
+}
+
 const onCommand = async (info, tab) => {
   tab = tab || await current();
 
@@ -321,52 +487,53 @@ const onCommand = async (info, tab) => {
   }
   else if (info.menuItemId === 'auto-login') {
     const {origin} = new URL(tab.url);
-    chrome.permissions.request({
-      origins: [origin + '/']
-    }, granted => {
-      if (granted) {
-        chrome.storage.local.get({
-          'json': []
-        }, async prefs => {
-          const o = prefs.json.filter(o => o.url.startsWith(origin)).shift();
-          try {
-            const r = await chrome.scripting.executeScript({
-              target: {
-                tabId: tab.id
-              },
-              func: (value = '') => {
-                return prompt(`What is the username to match with KeePass database?
+    chrome.storage.local.get({
+      'json': []
+    }, async prefs => {
+      const o = prefs.json.filter(o => o.url.startsWith(origin)).shift();
+      try {
+        const r = await chrome.scripting.executeScript({
+          target: {
+            tabId: tab.id
+          },
+          func: (value = '') => {
+            return prompt(`What is the username to match with KeePass database?
 
 This username must exactly correspond to one of the credentials stored in your KeePass database for this URL.`, value);
-              },
-              args: [o?.username || '']
-            });
-            if (r[0].result) {
-              if (o) {
-                o.username = r[0].result;
-              }
-              else {
-                prefs.json.push({
-                  url: origin,
-                  username: r[0].result
-                });
-              }
-            }
-            else {
-              if (o) {
-                const n = prefs.json.indexOf(o);
-                prefs.json.splice(n, 1);
-              }
-            }
-            chrome.storage.local.set(prefs);
-          }
-          catch (e) {
-            console.warn(e);
-            notify(tab, e);
-          }
+          },
+          args: [o?.username || '']
         });
+        if (r[0].result) {
+          if (o) {
+            o.username = r[0].result;
+          }
+          else {
+            prefs.json.push({
+              url: origin,
+              username: r[0].result
+            });
+          }
+        }
+        else {
+          if (o) {
+            const n = prefs.json.indexOf(o);
+            prefs.json.splice(n, 1);
+          }
+        }
+        chrome.storage.local.set(prefs);
+      }
+      catch (e) {
+        console.warn(e);
+        notify(tab, e);
       }
     });
+  }
+  else if (info.menuItemId === 'hints-open') {
+    chrome.tabs.sendMessage(tab.id, {
+      cmd: 'hints-open'
+    }, {
+      frameId: info.frameId || 0
+    }, () => chrome.runtime.lastError);
   }
   else if (info.menuItemId === 'open-embedded') {
     const target = {
@@ -414,9 +581,14 @@ chrome.runtime.onInstalled.addListener(icon);
 
 /* in KeePassXC mode check */
 chrome.storage.onChanged.addListener(ps => {
-  if (ps.engine && ps.engine.newValue === 'keepassxc') {
-    if (typeof chrome.runtime.sendNativeMessage === 'undefined') {
-      chrome.runtime.reload();
+  if (ps.engine) {
+    hints.ready = false;
+    hints.preparing = null;
+
+    if (ps.engine.newValue === 'keepassxc') {
+      if (typeof chrome.runtime.sendNativeMessage === 'undefined') {
+        chrome.runtime.reload();
+      }
     }
   }
   if (ps['ssdb-exported-key']) {

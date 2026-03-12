@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls does:*)",
+      "Bash(node:*)"
+    ]
+  }
+}

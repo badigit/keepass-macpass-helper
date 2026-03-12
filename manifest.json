@@ -10,15 +10,21 @@
     "scripting",
     "contextMenus"
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "optional_permissions": [
     "nativeMessaging"
-  ],
-  "optional_host_permissions": [
-    "<all_urls>"
   ],
   "background": {
     "service_worker": "worker.js"
   },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["/data/hints/inject.js"],
+    "run_at": "document_idle",
+    "all_frames": true
+  }],
   "action": {
     "default_popup": "/data/cmd/index.html"
   },

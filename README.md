@@ -19,4 +19,4 @@ Helper extension for KeePass to find and insert credentials, generate passwords,
 
 ### Building
 
-Run `./build.sh` to create a `keepass-helper.zip` package from the `v3` folder.
+Run `./build.sh` to create a `keepass-helper.zip` package from the repository root.
