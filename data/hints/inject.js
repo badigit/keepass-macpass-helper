@@ -2,7 +2,9 @@
 if (!self.__kpHintsInjected) {
   self.__kpHintsInjected = true;
 
-  const FIELD_RE = /user|login|email|name|account|логин|почта/i;
+  const USER_RE = /user(name)?|login|email|e-?mail|account|signin|log.?in|логин|почта|аккаунт/i;
+  const OTP_RE = /otp|2fa|two.?factor|auth|verification|one.?time|totp|mfa|code|token|pin|код/i;
+  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|title|description|name$/i;
   const CACHE_TTL = 30000;
 
   let host = null;   // Shadow DOM host element
@@ -17,18 +19,54 @@ if (!self.__kpHintsInjected) {
   let closeTimer = null;
   let suppressUntil = 0;
 
-  const isLoginField = el => {
+  const hintText = el => [
+    el?.name,
+    el?.id,
+    el?.getAttribute?.('autocomplete'),
+    el?.getAttribute?.('placeholder'),
+    el?.getAttribute?.('aria-label'),
+    el?.getAttribute?.('inputmode'),
+    el?.getAttribute?.('pattern')
+  ].filter(Boolean).join(' ');
+
+  const isOTPField = el => {
     if (!el || el.tagName !== 'INPUT') return false;
     const t = (el.type || '').toLowerCase();
+    if (!['text', 'tel', 'number', ''].includes(t)) return false;
+    const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
+    if (autocomplete.includes('one-time-code')) return true;
+    return OTP_RE.test(hintText(el));
+  };
+
+  const isClearlyNonAuthField = el => {
+    const hint = hintText(el).toLowerCase();
+    return NON_AUTH_RE.test(hint);
+  };
+
+  const isLoginField = el => {
+    if (!el || el.tagName !== 'INPUT') return false;
+    if (isClearlyNonAuthField(el)) return false;
+    const t = (el.type || '').toLowerCase();
+    if (isOTPField(el)) return true;
     if (t === 'password' || t === 'email') return true;
-    if (t === 'text' || t === 'tel' || t === '') {
-      const hint = [
-        el.name, el.id,
-        el.getAttribute('autocomplete'),
-        el.getAttribute('placeholder'),
-        el.getAttribute('aria-label')
-      ].filter(Boolean).join(' ');
-      return FIELD_RE.test(hint);
+    if (t === 'text' || t === 'tel' || t === 'number' || t === '') {
+      const hint = hintText(el);
+      const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
+      if (autocomplete.includes('username') || autocomplete.includes('current-password') || autocomplete.includes('new-password')) {
+        return true;
+      }
+      if (USER_RE.test(hint)) {
+        return true;
+      }
+      // login-first flows without password: single visible text-like input in the form
+      const form = el.closest('form');
+      if (form) {
+        const visibles = [...form.querySelectorAll('input')].filter(i => i.offsetParent);
+        const textLikes = visibles.filter(i => ['text', 'email', 'tel', 'number', ''].includes((i.type || '').toLowerCase()));
+        if (textLikes.length <= 2 && visibles.some(i => (i.type || '').toLowerCase() === 'submit' || i.tagName === 'BUTTON')) {
+          return true;
+        }
+      }
     }
     return false;
   };
@@ -71,6 +109,19 @@ if (!self.__kpHintsInjected) {
       }
       .kp-row > span { overflow: hidden; text-overflow: ellipsis; }
       .kp-row:hover, .kp-row.active { background: #4875bf; color: #fff; }
+      .kp-mode {
+        display: flex;
+        justify-content: flex-end;
+        padding: 6px 8px 0 8px;
+      }
+      .kp-mode > span {
+        font-size: 11px;
+        line-height: 1;
+        border: 1px solid #666;
+        border-radius: 10px;
+        padding: 2px 6px;
+        color: #ddd;
+      }
       .kp-empty {
         padding: 6px 10px;
         color: #999;
@@ -101,6 +152,16 @@ if (!self.__kpHintsInjected) {
     if (!list) return;
     list.innerHTML = '';
     selectedIdx = -1;
+
+    if (isOTPField(activeField)) {
+      const mode = document.createElement('div');
+      mode.className = 'kp-mode';
+      const chip = document.createElement('span');
+      chip.textContent = 'OTP';
+      mode.appendChild(chip);
+      list.appendChild(mode);
+    }
+
     if (!items.length) {
       const d = document.createElement('div');
       d.className = 'kp-empty';
@@ -151,13 +212,21 @@ if (!self.__kpHintsInjected) {
     const item = entries[idx];
     if (!item) return;
     // Suppress immediate re-open when autofill shifts focus to password.
-    suppressUntil = Date.now() + 2000;
+    suppressUntil = Date.now() + 600;
     hide();
-    chrome.runtime.sendMessage({
-      cmd: 'hints-fill',
-      index: item.originalIndex,
-      url: location.href
-    });
+    try {
+      // During extension reload/update the content-script context may be invalidated.
+      if (!chrome?.runtime?.id) {
+        return;
+      }
+      chrome.runtime.sendMessage({
+        cmd: 'hints-fill',
+        index: item.originalIndex,
+        target: isOTPField(activeField) ? 'otp' : 'credentials',
+        url: location.href
+      }).catch(() => {});
+    }
+    catch (e) {}
   };
 
   /* ---- Keyboard navigation ---- */
@@ -193,6 +262,10 @@ if (!self.__kpHintsInjected) {
   /* ---- Search with cache ---- */
   const search = async url => {
     if (url === cacheUrl && Date.now() - cacheTime < CACHE_TTL) return entries;
+    if (!chrome?.runtime?.id) {
+      entries = [];
+      return entries;
+    }
     try {
       const r = await chrome.runtime.sendMessage({cmd: 'hints-search', url});
       entries = (r && r.entries) || [];
@@ -205,10 +278,11 @@ if (!self.__kpHintsInjected) {
     return entries;
   };
 
-  const openForField = async el => {
+  const openForField = async (el, opts = {}) => {
+    const force = opts.force === true;
     if (!isLoginField(el)) return;
-    if (Date.now() < suppressUntil) return;
-    if (hasValue(el)) {
+    if (!force && Date.now() < suppressUntil) return;
+    if (!force && hasValue(el)) {
       hide();
       return;
     }
@@ -268,7 +342,7 @@ if (!self.__kpHintsInjected) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.cmd === 'hints-open') {
       const target = contextField || document.activeElement;
-      openForField(target).finally(() => sendResponse(true));
+      openForField(target, {force: true}).finally(() => sendResponse(true));
       return true;
     }
   });

@@ -105,6 +105,41 @@ const hints = {
   }
 };
 
+const otpWords = {
+  otp: ['KPH: otp', 'KPH:otp', 'otp', 'KPOTP'],
+  botp: ['TimeOtp-Secret-Base32']
+};
+const getStringFields = entry => entry?.stringFields || entry?.StringFields || [];
+const fieldByKeys = (fields, keys) => fields.find(f => keys.includes(f?.Key));
+const entryOTP = async entry => {
+  const stringFields = getStringFields(entry);
+  const otp = fieldByKeys(stringFields, otpWords.otp);
+  if (otp?.Value) {
+    return engine.otp(otp.Value);
+  }
+
+  // Built-in KeePass OTP fields
+  const secret = fieldByKeys(stringFields, otpWords.botp);
+  if (secret?.Value) {
+    const period = fieldByKeys(stringFields, ['TimeOtp-Period'])?.Value || 30;
+    const digits = fieldByKeys(stringFields, ['TimeOtp-Length'])?.Value || 6;
+    const args = new URLSearchParams();
+    args.set('secret', secret.Value);
+    args.set('period', period);
+    args.set('digits', digits);
+    return engine.otp(args.toString());
+  }
+
+  // KeePassXC built-in OTP
+  if (entry?.uuid) {
+    const v = await engine.asyncOTP(entry.uuid);
+    if (v) {
+      return v;
+    }
+  }
+  return '';
+};
+
 const copy = async (content, tab) => {
   // Firefox
   try {
@@ -208,6 +243,45 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         if (!entry) {
           return;
         }
+        if (request.target === 'otp') {
+          const otp = await entryOTP(entry).catch(() => '');
+          if (!otp) {
+            return;
+          }
+          await chrome.scripting.executeScript({
+            target: {tabId: tab.id},
+            func: otp => {
+              const active = document.activeElement;
+              const hint = e => ((e?.name || '') + ' ' + (e?.id || '') + ' ' +
+                (e?.getAttribute?.('autocomplete') || '') + ' ' +
+                (e?.getAttribute?.('placeholder') || '') + ' ' +
+                (e?.getAttribute?.('aria-label') || '')).toLowerCase();
+              const otpRe = /otp|2fa|two.?factor|auth|verification|one.?time|totp|mfa|code|token|pin/;
+
+              const isOTP = e => {
+                if (!e || e.tagName !== 'INPUT') return false;
+                const t = (e.type || '').toLowerCase();
+                if (!['text', 'tel', 'number', ''].includes(t)) return false;
+                if ((e.getAttribute('autocomplete') || '').toLowerCase().includes('one-time-code')) return true;
+                return otpRe.test(hint(e));
+              };
+
+              const candidates = [...document.querySelectorAll('input')].filter(e => e.offsetParent);
+              const field = isOTP(active) ? active : (candidates.find(isOTP) || active);
+              if (!field || field.tagName !== 'INPUT') return;
+
+              field.focus();
+              document.execCommand('selectAll', false, '');
+              if (!document.execCommand('insertText', false, otp)) {
+                field.value = otp;
+              }
+              field.dispatchEvent(new Event('change', {bubbles: true}));
+              field.dispatchEvent(new Event('input', {bubbles: true}));
+            },
+            args: [otp]
+          });
+          return;
+        }
         const username = entry.Login || '';
         const password = entry.Password || '';
 
@@ -221,43 +295,101 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         await chrome.scripting.executeScript({
           target: {tabId: tab.id},
           func: (username, password) => {
+            const setInputValue = (el, value) => {
+              if (!el) {
+                return;
+              }
+              el.focus();
+              const setNative = v => {
+                const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+                if (descriptor && descriptor.set) {
+                  descriptor.set.call(el, v);
+                }
+                else {
+                  el.value = v;
+                }
+              };
+
+              // 1) Primary path for React/Vue controlled inputs.
+              try {
+                setNative(value);
+              }
+              catch (e) {
+                try {
+                  el.value = value;
+                }
+                catch (ex) {}
+              }
+
+              try {
+                el.dispatchEvent(new InputEvent('input', {
+                  bubbles: true,
+                  composed: true,
+                  data: String(value),
+                  inputType: 'insertReplacementText'
+                }));
+              }
+              catch (e) {
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+              }
+              el.dispatchEvent(new Event('change', {bubbles: true}));
+
+              // 2) Fallback if value still did not stick.
+              if (el.value !== value) {
+                try {
+                  document.execCommand('selectAll', false, '');
+                }
+                catch (e) {}
+                let ok = false;
+                try {
+                  ok = document.execCommand('insertText', false, value);
+                }
+                catch (e) {}
+                if (!ok) {
+                  try {
+                    setNative(value);
+                  }
+                  catch (e) {
+                    try {
+                      el.value = value;
+                    }
+                    catch (ex) {}
+                  }
+                }
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+              }
+            };
+
             const active = document.activeElement;
             // Find the form context
             const form = self.detectForm
               ? self.detectForm(active)
               : active.closest('form') || document;
 
-            // Fill username
-            const userFields = [
-              ...form.querySelectorAll('input[type=email]'),
-              ...form.querySelectorAll('input[type=text]')
-            ].filter(e => e.offsetParent);
+            // Fill password
+            const pwFields = [...form.querySelectorAll('input[type=password]')]
+              .filter(e => e.offsetParent);
+            for (const e of pwFields) {
+              setInputValue(e, password);
+            }
+
+            // Fill username last: some SPAs overwrite username state when password changes.
+            const userFields = [...form.querySelectorAll('input')].filter(e => {
+              if (!e.offsetParent) {
+                return false;
+              }
+              const t = (e.type || '').toLowerCase();
+              return ['text', 'email', 'tel', 'search', 'url', 'number', ''].includes(t);
+            });
 
             if (username && userFields.length) {
               const target = userFields.find(e => {
                 const hint = (e.name + e.id + (e.getAttribute('autocomplete') || '')).toLowerCase();
                 return /user|login|email|name|account/.test(hint);
               }) || userFields[0];
-              target.focus();
-              document.execCommand('selectAll', false, '');
-              if (!document.execCommand('insertText', false, username)) {
-                target.value = username;
-              }
-              target.dispatchEvent(new Event('change', {bubbles: true}));
-              target.dispatchEvent(new Event('input', {bubbles: true}));
-            }
-
-            // Fill password
-            const pwFields = [...form.querySelectorAll('input[type=password]')]
-              .filter(e => e.offsetParent);
-            for (const e of pwFields) {
-              e.focus();
-              document.execCommand('selectAll', false, '');
-              if (!document.execCommand('insertText', false, password)) {
-                try { e.value = password; } catch (ex) {}
-              }
-              e.dispatchEvent(new Event('change', {bubbles: true}));
-              e.dispatchEvent(new Event('input', {bubbles: true}));
+              setInputValue(target, username);
             }
           },
           args: [username, password]
