@@ -44,63 +44,11 @@ const safeExecuteScript = async options => {
 safeExecuteScript.frameError = false;
 
 const timebased = {
-  words: {
-    otp: ['KPH: otp', 'KPH:otp', 'otp', 'KPOTP'],
-    sotp: ['KPH: sotp', 'KPH:sotp', 'sotp'],
-    botp: ['TimeOtp-Secret-Base32']
-  },
-  includes(o) {
-    const {stringFields = []} = o;
-
-    if (o) {
-      const b = stringFields.some(o => timebased.words.otp.includes(o.Key)) ||
-        stringFields.some(o => timebased.words.sotp.includes(o.Key)) ||
-        stringFields.some(o => timebased.words.botp.includes(o.Key));
-
-      if (b) {
-        return Promise.resolve(true);
-      }
-      if (o.uuid) {
-        return engine.asyncOTP(o.uuid).then(totp => totp !== '');
-      }
-    }
-    return Promise.resolve(false);
-  },
+  includes: o => OTPResolve.includes(o),
   async get(o) {
-    const {stringFields} = o;
-
-    const otp = stringFields.filter(o => timebased.words.otp.includes(o.Key)).shift();
-    const sotp = stringFields.filter(o => timebased.words.sotp.includes(o.Key)).shift();
-
-    if (sotp) {
-      return await engine.otp(await decrypt(sotp.Value));
-    }
-    else if (otp) {
-      return await engine.otp(otp.Value);
-    }
-
-    // built-in OTP of KeePass
-    const secret = stringFields.filter(o => timebased.words.botp.includes(o.Key)).shift();
-    const period = stringFields.filter(o => ['TimeOtp-Period'].includes(o.Key)).shift();
-    const digits = stringFields.filter(o => ['TimeOtp-Length'].includes(o.Key)).shift();
-
-    if (secret) {
-      const args = new URLSearchParams();
-      args.set('secret', secret.Value);
-      args.set('period', period?.Value || 30);
-      args.set('digits', digits?.Value || 6);
-
-      return await engine.otp(args.toString());
-    }
-
-    if (o.uuid) {
-      const v = engine.asyncOTP(o.uuid);
-      if (v) {
-        return v;
-      }
-    }
-
-    throw Error('NO_OTP_Provided');
+    const v = await OTPResolve.get(o, decrypt);
+    if (!v) throw Error('NO_OTP_Provided');
+    return v;
   }
 };
 

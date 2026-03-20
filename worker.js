@@ -14,7 +14,8 @@ importScripts(
   '/connect/keepass/keepass.js',
   '/connect/keepassxc/nacl-fast.min.js',
   '/connect/keepassxc/keepassxc.js',
-  '/connect/totp.js'
+  '/connect/totp.js',
+  '/connect/otp-resolve.js'
 );
 
 const current = () => chrome.tabs.query({
@@ -105,40 +106,7 @@ const hints = {
   }
 };
 
-const otpWords = {
-  otp: ['KPH: otp', 'KPH:otp', 'otp', 'KPOTP'],
-  botp: ['TimeOtp-Secret-Base32']
-};
-const getStringFields = entry => entry?.stringFields || entry?.StringFields || [];
-const fieldByKeys = (fields, keys) => fields.find(f => keys.includes(f?.Key));
-const entryOTP = async entry => {
-  const stringFields = getStringFields(entry);
-  const otp = fieldByKeys(stringFields, otpWords.otp);
-  if (otp?.Value) {
-    return engine.otp(otp.Value);
-  }
-
-  // Built-in KeePass OTP fields
-  const secret = fieldByKeys(stringFields, otpWords.botp);
-  if (secret?.Value) {
-    const period = fieldByKeys(stringFields, ['TimeOtp-Period'])?.Value || 30;
-    const digits = fieldByKeys(stringFields, ['TimeOtp-Length'])?.Value || 6;
-    const args = new URLSearchParams();
-    args.set('secret', secret.Value);
-    args.set('period', period);
-    args.set('digits', digits);
-    return engine.otp(args.toString());
-  }
-
-  // KeePassXC built-in OTP
-  if (entry?.uuid) {
-    const v = await engine.asyncOTP(entry.uuid);
-    if (v) {
-      return v;
-    }
-  }
-  return '';
-};
+const entryOTP = entry => OTPResolve.get(entry);
 
 const copy = async (content, tab) => {
   // Firefox
