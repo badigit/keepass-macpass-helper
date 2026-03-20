@@ -216,6 +216,11 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
           if (!otp) {
             return;
           }
+          // Inject helper.js first — provides setInputValue for OTP fill
+          await chrome.scripting.executeScript({
+            target: {tabId: tab.id},
+            files: ['/data/helper.js']
+          });
           await chrome.scripting.executeScript({
             target: {tabId: tab.id},
             func: otp => {
@@ -238,13 +243,7 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
               const field = isOTP(active) ? active : (candidates.find(isOTP) || active);
               if (!field || field.tagName !== 'INPUT') return;
 
-              field.focus();
-              document.execCommand('selectAll', false, '');
-              if (!document.execCommand('insertText', false, otp)) {
-                field.value = otp;
-              }
-              field.dispatchEvent(new Event('change', {bubbles: true}));
-              field.dispatchEvent(new Event('input', {bubbles: true}));
+              self.setInputValue(field, otp);
             },
             args: [otp]
           });
@@ -253,7 +252,7 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         const username = entry.Login || '';
         const password = entry.Password || '';
 
-        // Inject helper.js for detectForm
+        // Inject helper.js for detectForm + setInputValue
         await chrome.scripting.executeScript({
           target: {tabId: tab.id},
           files: ['/data/helper.js']
@@ -263,73 +262,6 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         await chrome.scripting.executeScript({
           target: {tabId: tab.id},
           func: (username, password) => {
-            const setInputValue = (el, value) => {
-              if (!el) {
-                return;
-              }
-              el.focus();
-              const setNative = v => {
-                const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-                const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-                if (descriptor && descriptor.set) {
-                  descriptor.set.call(el, v);
-                }
-                else {
-                  el.value = v;
-                }
-              };
-
-              // 1) Primary path for React/Vue controlled inputs.
-              try {
-                setNative(value);
-              }
-              catch (e) {
-                try {
-                  el.value = value;
-                }
-                catch (ex) {}
-              }
-
-              try {
-                el.dispatchEvent(new InputEvent('input', {
-                  bubbles: true,
-                  composed: true,
-                  data: String(value),
-                  inputType: 'insertReplacementText'
-                }));
-              }
-              catch (e) {
-                el.dispatchEvent(new Event('input', {bubbles: true}));
-              }
-              el.dispatchEvent(new Event('change', {bubbles: true}));
-
-              // 2) Fallback if value still did not stick.
-              if (el.value !== value) {
-                try {
-                  document.execCommand('selectAll', false, '');
-                }
-                catch (e) {}
-                let ok = false;
-                try {
-                  ok = document.execCommand('insertText', false, value);
-                }
-                catch (e) {}
-                if (!ok) {
-                  try {
-                    setNative(value);
-                  }
-                  catch (e) {
-                    try {
-                      el.value = value;
-                    }
-                    catch (ex) {}
-                  }
-                }
-                el.dispatchEvent(new Event('input', {bubbles: true}));
-                el.dispatchEvent(new Event('change', {bubbles: true}));
-              }
-            };
-
             const active = document.activeElement;
             // Find the form context
             const form = self.detectForm
@@ -340,7 +272,7 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
             const pwFields = [...form.querySelectorAll('input[type=password]')]
               .filter(e => e.offsetParent);
             for (const e of pwFields) {
-              setInputValue(e, password);
+              self.setInputValue(e, password);
             }
 
             // Fill username last: some SPAs overwrite username state when password changes.
@@ -357,7 +289,7 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
                 const hint = (e.name + e.id + (e.getAttribute('autocomplete') || '')).toLowerCase();
                 return /user|login|email|name|account/.test(hint);
               }) || userFields[0];
-              setInputValue(target, username);
+              self.setInputValue(target, username);
             }
           },
           args: [username, password]

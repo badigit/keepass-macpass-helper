@@ -47,5 +47,60 @@ self.detectForm = function(e, query = '[type=password]') {
   return parent;
 };
 
+// Reliably set an input value across React/Vue controlled inputs and plain forms.
+self.setInputValue = function(el, value) {
+  if (!el) return;
+  el.focus();
+
+  const setNative = v => {
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(el, v);
+    }
+    else {
+      el.value = v;
+    }
+  };
+
+  // Primary path for React/Vue controlled inputs.
+  try { setNative(value); }
+  catch (e) {
+    try { el.value = value; }
+    catch (ex) {}
+  }
+
+  try {
+    el.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      composed: true,
+      data: String(value),
+      inputType: 'insertReplacementText'
+    }));
+  }
+  catch (e) {
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+  }
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+
+  // Fallback if value still did not stick.
+  if (el.value !== value) {
+    try { document.execCommand('selectAll', false, ''); }
+    catch (e) {}
+    let ok = false;
+    try { ok = document.execCommand('insertText', false, value); }
+    catch (e) {}
+    if (!ok) {
+      try { setNative(value); }
+      catch (e) {
+        try { el.value = value; }
+        catch (ex) {}
+      }
+    }
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+    el.dispatchEvent(new Event('change', {bubbles: true}));
+  }
+};
+
 // eslint-disable-next-line eol-last, semi
 ''
