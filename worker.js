@@ -316,6 +316,21 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       }
     })();
   }
+  else if (request.cmd === 'hints-report-missed') {
+    (async () => {
+      try {
+        const {hintsMissedReports = []} = await chrome.storage.local.get('hintsMissedReports');
+        hintsMissedReports.push(request.fieldMeta);
+        if (hintsMissedReports.length > 500) {
+          hintsMissedReports.splice(0, hintsMissedReports.length - 500);
+        }
+        await chrome.storage.local.set({hintsMissedReports});
+      }
+      catch (e) {
+        console.warn('hints-report-missed:', e);
+      }
+    })();
+  }
 });
 
 // Context Menu
@@ -339,6 +354,11 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
     chrome.contextMenus.create({
       id: 'hints-open',
       title: 'Show KeePass Suggestions',
+      contexts: ['editable']
+    }, () => chrome.runtime.lastError);
+    chrome.contextMenus.create({
+      id: 'hints-report-missed',
+      title: 'Report: hint should appear here',
       contexts: ['editable']
     }, () => chrome.runtime.lastError);
     chrome.contextMenus.create({
@@ -579,6 +599,13 @@ This username must exactly correspond to one of the credentials stored in your K
   else if (info.menuItemId === 'hints-open') {
     chrome.tabs.sendMessage(tab.id, {
       cmd: 'hints-open'
+    }, {
+      frameId: info.frameId || 0
+    }, () => chrome.runtime.lastError);
+  }
+  else if (info.menuItemId === 'hints-report-missed') {
+    chrome.tabs.sendMessage(tab.id, {
+      cmd: 'hints-report-missed'
     }, {
       frameId: info.frameId || 0
     }, () => chrome.runtime.lastError);

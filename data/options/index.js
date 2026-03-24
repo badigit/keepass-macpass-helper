@@ -394,6 +394,41 @@ document.getElementById('ssdb-clear').onclick = () => {
   };
 }
 
+// Missed hints reports
+{
+  const updateCount = () => {
+    chrome.storage.local.get('hintsMissedReports', ({hintsMissedReports = []}) => {
+      document.getElementById('hints-missed-count').textContent =
+        hintsMissedReports.length ? `(${hintsMissedReports.length} reports)` : '(empty)';
+    });
+  };
+  updateCount();
+
+  document.getElementById('hints-missed-export').onclick = () => {
+    chrome.storage.local.get('hintsMissedReports', ({hintsMissedReports = []}) => {
+      if (!hintsMissedReports.length) {
+        return toast('No reports to export');
+      }
+      const text = JSON.stringify(hintsMissedReports, null, 2);
+      const blob = new Blob([text], {type: 'application/json'});
+      const href = URL.createObjectURL(blob);
+      Object.assign(document.createElement('a'), {
+        href,
+        type: 'application/json',
+        download: 'keepass-helper-missed-hints.json'
+      }).dispatchEvent(new MouseEvent('click'));
+      setTimeout(() => URL.revokeObjectURL(href));
+    });
+  };
+
+  document.getElementById('hints-missed-clear').onclick = () => {
+    chrome.storage.local.remove('hintsMissedReports', () => {
+      toast('Reports cleared');
+      updateCount();
+    });
+  };
+}
+
 document.getElementById('keepassxc-manifest').onclick = () => {
   const path =
     navigator.platform.startsWith('Win') ?

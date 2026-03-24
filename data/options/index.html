@@ -147,12 +147,17 @@
     <button id="ssdb-export">Export</button> -
     <button id="ssdb-clear">Delete all Credentials</button>
   </div>
-  <h2 class="heading">Unwanted Hint Reports</h2>
-  <p>Fields where hints were reported as unwanted. Export as JSON to analyze patterns.</p>
+  <h2 class="heading">Hint Detection Reports</h2>
+  <p>Fields where hints were reported as unwanted (false positive) or missed (false negative). Export as JSON to analyze patterns.</p>
   <div class="fl">
-    <button id="hints-reports-export">Export Reports</button>
-    <button id="hints-reports-clear">Clear Reports</button>
+    <button id="hints-reports-export">Export Unwanted</button>
+    <button id="hints-reports-clear">Clear Unwanted</button>
     <span id="hints-reports-count"></span>
+  </div>
+  <div class="fl">
+    <button id="hints-missed-export">Export Missed</button>
+    <button id="hints-missed-clear">Clear Missed</button>
+    <span id="hints-missed-count"></span>
   </div>
   <h2 class="heading">Misc</h2>
   <div class="om disabled">

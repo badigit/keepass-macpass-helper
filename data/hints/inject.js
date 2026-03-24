@@ -4,7 +4,7 @@ if (!self.__kpHintsInjected) {
 
   const USER_RE = /user(name)?|login|email|e-?mail|account|signin|log.?in|логин|почта|аккаунт/i;
   const OTP_RE = /otp|2fa|two.?factor|auth|verification|one.?time|totp|mfa|code|token|pin|код/i;
-  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|title|description|name$/i;
+  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|title|description|(?<!user)name$/i;
   const CACHE_TTL = 30000;
 
   let host = null;   // Shadow DOM host element
@@ -256,6 +256,7 @@ if (!self.__kpHintsInjected) {
 
   const reportUnwanted = () => {
     const meta = collectFieldMeta(activeField);
+    meta.reportType = 'unwanted';
     hide();
     try {
       if (!chrome?.runtime?.id) return;
@@ -414,6 +415,20 @@ if (!self.__kpHintsInjected) {
       const target = contextField || document.activeElement;
       openForField(target, {force: true}).finally(() => sendResponse(true));
       return true;
+    }
+    if (message && message.cmd === 'hints-report-missed') {
+      const target = contextField || document.activeElement;
+      const meta = collectFieldMeta(target);
+      meta.reportType = 'missed';
+      try {
+        if (chrome?.runtime?.id) {
+          chrome.runtime.sendMessage({
+            cmd: 'hints-report-missed',
+            fieldMeta: meta
+          }).catch(() => {});
+        }
+      } catch (e) {}
+      sendResponse(true);
     }
   });
 }
