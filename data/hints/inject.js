@@ -127,6 +127,24 @@ if (!self.__kpHintsInjected) {
         color: #999;
         text-align: center;
       }
+      .kp-footer {
+        display: flex;
+        justify-content: flex-end;
+        padding: 2px 6px;
+        border-top: 1px solid #444;
+      }
+      .kp-report-btn {
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 3px;
+        color: #888;
+        font-size: 11px;
+        cursor: pointer;
+        padding: 2px 6px;
+        line-height: 1;
+      }
+      .kp-report-btn:hover { color: #e55; border-color: #e55; }
+      .kp-report-btn.done { color: #5a5; border-color: #5a5; pointer-events: none; }
     `;
     shadow.appendChild(style);
 
@@ -194,6 +212,58 @@ if (!self.__kpHintsInjected) {
         pick(i);
       });
     });
+
+    // Report "unwanted hint" footer
+    const footer = document.createElement('div');
+    footer.className = 'kp-footer';
+    const reportBtn = document.createElement('button');
+    reportBtn.className = 'kp-report-btn';
+    reportBtn.textContent = '\u2717 not a login field';
+    reportBtn.addEventListener('mousedown', ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      reportUnwanted();
+      reportBtn.textContent = '\u2713 reported';
+      reportBtn.classList.add('done');
+    });
+    footer.appendChild(reportBtn);
+    list.appendChild(footer);
+  };
+
+  /* ---- Report unwanted hint trigger ---- */
+  const collectFieldMeta = el => {
+    if (!el) return {};
+    const form = el.closest('form');
+    return {
+      tag: el.tagName,
+      type: el.type || '',
+      name: el.name || '',
+      id: el.id || '',
+      autocomplete: el.getAttribute('autocomplete') || '',
+      placeholder: el.getAttribute('placeholder') || '',
+      ariaLabel: el.getAttribute('aria-label') || '',
+      inputmode: el.getAttribute('inputmode') || '',
+      pattern: el.getAttribute('pattern') || '',
+      className: (el.className || '').toString().slice(0, 200),
+      isOTP: isOTPField(el),
+      formAction: form ? (form.action || '') : null,
+      formId: form ? (form.id || '') : null,
+      url: location.href,
+      title: document.title,
+      timestamp: new Date().toISOString()
+    };
+  };
+
+  const reportUnwanted = () => {
+    const meta = collectFieldMeta(activeField);
+    hide();
+    try {
+      if (!chrome?.runtime?.id) return;
+      chrome.runtime.sendMessage({
+        cmd: 'hints-report-unwanted',
+        fieldMeta: meta
+      }).catch(() => {});
+    } catch (e) {}
   };
 
   /* ---- Show / hide ---- */

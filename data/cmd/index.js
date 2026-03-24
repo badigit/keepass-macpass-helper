@@ -44,83 +44,11 @@ const safeExecuteScript = async options => {
 safeExecuteScript.frameError = false;
 
 const timebased = {
-  words: {
-    otp: ['KPH: otp', 'KPH:otp', 'otp', 'KPOTP'],
-    sotp: ['KPH: sotp', 'KPH:sotp', 'sotp'],
-    botp: ['TimeOtp-Secret-Base32']
-  },
-  includes(o) {
-    const {stringFields = []} = o;
-
-    // Отладочное логирование
-    console.log('OTP Debug - Проверяю запись:', o.name || o.Name);
-    console.log('OTP Debug - StringFields:', stringFields);
-    console.log('OTP Debug - UUID:', o.uuid);
-
-    if (o) {
-      const b = stringFields.some(o => timebased.words.otp.includes(o.Key)) ||
-        stringFields.some(o => timebased.words.sotp.includes(o.Key)) ||
-        stringFields.some(o => timebased.words.botp.includes(o.Key));
-
-      console.log('OTP Debug - Найдены поля OTP/SOTP/BOTP:', b);
-
-      if (b) {
-        return Promise.resolve(true);
-      }
-      if (o.uuid) {
-        return engine.asyncOTP(o.uuid).then(totp => {
-          console.log('OTP Debug - engine.asyncOTP результат:', totp);
-          return totp !== '';
-        });
-      }
-    }
-    return Promise.resolve(false);
-  },
+  includes: o => OTPResolve.includes(o),
   async get(o) {
-    const {stringFields} = o;
-
-    console.log('OTP Debug GET - Запись:', o.name || o.Name);
-    console.log('OTP Debug GET - StringFields:', stringFields);
-
-    const otp = stringFields.filter(o => timebased.words.otp.includes(o.Key)).shift();
-    const sotp = stringFields.filter(o => timebased.words.sotp.includes(o.Key)).shift();
-
-    console.log('OTP Debug GET - Найдено OTP поле:', otp);
-    console.log('OTP Debug GET - Найдено SOTP поле:', sotp);
-
-    if (sotp) {
-      return await engine.otp(await decrypt(sotp.Value));
-    }
-    else if (otp) {
-      return await engine.otp(otp.Value);
-    }
-
-    // built-in OTP of KeePass
-    const secret = stringFields.filter(o => timebased.words.botp.includes(o.Key)).shift();
-    const period = stringFields.filter(o => ['TimeOtp-Period'].includes(o.Key)).shift();
-    const digits = stringFields.filter(o => ['TimeOtp-Length'].includes(o.Key)).shift();
-
-    console.log('OTP Debug GET - Встроенный KeePass OTP:', {secret, period, digits});
-
-    if (secret) {
-      const args = new URLSearchParams();
-      args.set('secret', secret.Value);
-      args.set('period', period?.Value || 30);
-      args.set('digits', digits?.Value || 6);
-
-      return await engine.otp(args.toString());
-    }
-
-    if (o.uuid) {
-      const v = engine.asyncOTP(o.uuid);
-      if (v) {
-        console.log('OTP Debug GET - asyncOTP результат:', v);
-        return v;
-      }
-    }
-
-    console.log('OTP Debug GET - OTP не найден');
-    throw Error(Error('NO_OTP_Provided'));
+    const v = await OTPResolve.get(o, decrypt);
+    if (!v) throw Error('NO_OTP_Provided');
+    return v;
   }
 };
 
@@ -454,26 +382,17 @@ insert.fields = async o => {
             catch (e) {}
           }
           if (custom) {
-            custom.focus();
             if (custom.type === 'radio' || custom.type === 'checkbox') {
               custom.checked = o.Value === 'false' || o.Value === '' ? false : true;
+              custom.dispatchEvent(new Event('change', {bubbles: true}));
             }
             else if ('selectedIndex' in custom) {
               custom.value = o.Value;
+              custom.dispatchEvent(new Event('change', {bubbles: true}));
             }
             else {
-              document.execCommand('selectAll', false, '');
-              const v = document.execCommand('insertText', false, o.Value);
-              if (!v) {
-                try {
-                  custom.value = o.Value;
-                }
-                catch (e) {}
-              }
+              self.setInputValue(custom, o.Value);
             }
-
-            custom.dispatchEvent(new Event('change', {bubbles: true}));
-            custom.dispatchEvent(new Event('input', {bubbles: true}));
             inserted = true;
           }
         }
@@ -490,54 +409,33 @@ insert.username = username => safeExecuteScript({
     allFrames
   },
   func: username => {
-    const once = aElement => {
+    const {aElement} = window;
+    if (!aElement) return;
+
+    [aElement].flat().forEach(el => {
       // insert username is requested; but password field is selected
-      if (aElement.type === 'password') {
-        const form = window.detectForm(aElement);
+      if (el.type === 'password') {
+        const form = window.detectForm(el);
         if (form) {
-          const e = [ // first use type=email
+          const found = [ // first use type=email
             ...form.extendedQuerySelectorAll('input[type=email]'),
             ...form.extendedQuerySelectorAll('input[type=text]')
           ].filter(e => e.offsetParent).sort((a, b) => {
-            // try to find the best matched username field
             const keys = ['user', 'usr', 'login'];
-
             const av = keys.some(s => (a.name || '').includes(s) || (a.id || '').includes(s));
             const bv = keys.some(s => (b.name || '').includes(s) || (b.id || '').includes(s));
-
-            if (av && bv === false) {
-              return -1;
-            }
-            if (av === false && bv) {
-              return 1;
-            }
+            if (av && !bv) return -1;
+            if (!av && bv) return 1;
+            return 0;
           }).shift();
 
-          if (e) {
-            aElement = e;
-            aElement.focus();
-          }
+          if (found) el = found;
         }
       }
+      self.setInputValue(el, username);
+    });
 
-      const r = document.execCommand('selectAll', false, '') &&
-        document.execCommand('insertText', false, username);
-      if (r === false) {
-        aElement.value = username;
-      }
-      aElement.dispatchEvent(new Event('change', {bubbles: true}));
-      aElement.dispatchEvent(new Event('input', {bubbles: true}));
-    };
-    const {aElement} = window;
-
-    if (aElement) {
-      [aElement].flat().forEach(e => {
-        e.focus();
-        once(e);
-      });
-
-      return true;
-    }
+    return true;
   },
   args: [username]
 });
@@ -547,15 +445,12 @@ insert.password = password => safeExecuteScript({
     allFrames
   },
   func: password => {
-    const es = [];
     const aElement = window.aElement;
+    if (!aElement) return;
 
-    if (!aElement) {
-      return;
-    }
-
-    // try to find the password field
-    for (const e of [[aElement]].flat()) {
+    // try to find the password field(s)
+    const es = [];
+    for (const e of [aElement].flat()) {
       if (e.type === 'password') {
         es.push(e);
       }
@@ -572,21 +467,7 @@ insert.password = password => safeExecuteScript({
     }
     let inserted = false;
     for (const e of es) {
-      e.focus();
-      let v = false;
-      // only insert if password element is focused
-      if (document.activeElement === e) {
-        document.execCommand('selectAll', false, '');
-        v = document.execCommand('insertText', false, password);
-      }
-      if (!v) {
-        try {
-          e.value = password;
-        }
-        catch (e) {}
-      }
-      e.dispatchEvent(new Event('change', {bubbles: true}));
-      e.dispatchEvent(new Event('input', {bubbles: true}));
+      self.setInputValue(e, password);
       inserted = true;
     }
     return inserted;

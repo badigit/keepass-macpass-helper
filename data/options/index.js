@@ -359,6 +359,41 @@ document.getElementById('ssdb-clear').onclick = () => {
   }
 };
 
+// Unwanted hints reports
+{
+  const updateCount = () => {
+    chrome.storage.local.get('hintsUnwantedReports', ({hintsUnwantedReports = []}) => {
+      document.getElementById('hints-reports-count').textContent =
+        hintsUnwantedReports.length ? `(${hintsUnwantedReports.length} reports)` : '(empty)';
+    });
+  };
+  updateCount();
+
+  document.getElementById('hints-reports-export').onclick = () => {
+    chrome.storage.local.get('hintsUnwantedReports', ({hintsUnwantedReports = []}) => {
+      if (!hintsUnwantedReports.length) {
+        return toast('No reports to export');
+      }
+      const text = JSON.stringify(hintsUnwantedReports, null, 2);
+      const blob = new Blob([text], {type: 'application/json'});
+      const href = URL.createObjectURL(blob);
+      Object.assign(document.createElement('a'), {
+        href,
+        type: 'application/json',
+        download: 'keepass-helper-unwanted-hints.json'
+      }).dispatchEvent(new MouseEvent('click'));
+      setTimeout(() => URL.revokeObjectURL(href));
+    });
+  };
+
+  document.getElementById('hints-reports-clear').onclick = () => {
+    chrome.storage.local.remove('hintsUnwantedReports', () => {
+      toast('Reports cleared');
+      updateCount();
+    });
+  };
+}
+
 document.getElementById('keepassxc-manifest').onclick = () => {
   const path =
     navigator.platform.startsWith('Win') ?
