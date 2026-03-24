@@ -300,6 +300,22 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       }
     })();
   }
+  else if (request.cmd === 'hints-report-unwanted') {
+    (async () => {
+      try {
+        const {hintsUnwantedReports = []} = await chrome.storage.local.get('hintsUnwantedReports');
+        hintsUnwantedReports.push(request.fieldMeta);
+        // Keep last 500 reports max
+        if (hintsUnwantedReports.length > 500) {
+          hintsUnwantedReports.splice(0, hintsUnwantedReports.length - 500);
+        }
+        await chrome.storage.local.set({hintsUnwantedReports});
+      }
+      catch (e) {
+        console.warn('hints-report-unwanted:', e);
+      }
+    })();
+  }
 });
 
 // Context Menu
