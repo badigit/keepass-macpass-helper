@@ -28,6 +28,10 @@ class Safe {
   import(string) {/* Uint8Array */
     const decodedKeyData = new Uint8Array(Array.from(atob(string), c => c.charCodeAt(0)));
 
+    if (decodedKeyData.byteLength !== 16 && decodedKeyData.byteLength !== 32) {
+      return Promise.reject(Error('INVALID_EXPORTED_KEY_LENGTH'));
+    }
+
     return crypto.subtle.importKey('raw', decodedKeyData, {
       name: 'AES-CBC'
     }, true, ['encrypt', 'decrypt']).then(key => {

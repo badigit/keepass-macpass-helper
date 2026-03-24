@@ -47,6 +47,7 @@ engine.hasSSDB = () => new Promise(resolve => chrome.storage.session.get({
 
 engine.prepare = type => {
   engine.type = type;
+  engine.ssdb = undefined;
   if (type === 'keepass') {
     engine.core = new KeePass();
   }
@@ -87,7 +88,11 @@ engine.prepare = type => {
 
       if (exportedKey) {
         engine.ssdb = new SecureSyncedStorage();
-        engine.ssdb.import(exportedKey).then(resolve);
+        engine.ssdb.import(exportedKey).then(resolve).catch(e => {
+          console.warn('Unable to restore Secure Synced Storage key from session', e);
+          engine.ssdb = undefined;
+          chrome.storage.session.remove('ssdb-exported-key', resolve);
+        });
       }
       else {
         resolve();
@@ -139,6 +144,48 @@ engine.set = query => {
   return engine.core.set(query);
 };
 
+engine['open-connect-interface'] = async () => {
+  const url = chrome.runtime.getURL('/connect/interface/index.html');
+
+  try {
+    const createData = {
+      url,
+      width: 400,
+      height: 300,
+      type: 'popup'
+    };
+    const win = await chrome.windows.getCurrent();
+
+    if (
+      Number.isFinite(win.left) &&
+      Number.isFinite(win.top) &&
+      Number.isFinite(win.width) &&
+      Number.isFinite(win.height)
+    ) {
+      createData.left = win.left + Math.round((win.width - createData.width) / 2);
+      createData.top = win.top + Math.round((win.height - createData.height) / 2);
+    }
+
+    await chrome.windows.create(createData);
+    return 'popup';
+  }
+  catch (e) {
+    console.warn('Unable to open connect popup', e);
+  }
+
+  try {
+    if (window.open(url, '_blank')) {
+      return 'tab';
+    }
+  }
+  catch (e) {
+    console.warn('Unable to open connect page in a new tab', e);
+  }
+
+  window.location.href = url;
+  return 'same-tab';
+};
+
 engine.connected = async type => {
   try {
     if (type === 'keepass') {
@@ -151,16 +198,11 @@ engine.connected = async type => {
   catch (e) {
     console.warn(e);
 
-    const win = await chrome.windows.getCurrent();
-    chrome.windows.create({
-      url: '/connect/interface/index.html',
-      width: 400,
-      height: 300,
-      left: win.left + Math.round((win.width - 400) / 2),
-      top: win.top + Math.round((win.height - 300) / 2),
-      type: 'popup'
-    }, () => window.close());
+    const mode = await engine['open-connect-interface']();
+    if (mode !== 'same-tab') {
+      window.close();
+    }
 
-    throw Error(e);
+    throw e instanceof Error ? e : new Error(String(e));
   }
 };
