@@ -3,8 +3,8 @@ if (!self.__kpHintsInjected) {
   self.__kpHintsInjected = true;
 
   const USER_RE = /user(name)?|login|email|e-?mail|account|signin|log.?in|логин|почта|аккаунт/i;
-  const OTP_RE = /otp|2fa|two.?factor|auth|verification|one.?time|totp|mfa|code|token|pin|код/i;
-  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|title|description|(?<!user)name$/i;
+  const OTP_RE = /\botp\b|\b2fa\b|\btwo.?factor\b|\bverification\b|\bone.?time\b|\btotp\b|\bmfa\b|\bcode\b|\bpin\b|\bкод\b/i;
+  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|title|description|command|directory|folder|(?<!user)name$/i;
   const CACHE_TTL = 30000;
 
   let host = null;   // Shadow DOM host element
@@ -49,7 +49,7 @@ if (!self.__kpHintsInjected) {
     const t = (el.type || '').toLowerCase();
     if (isOTPField(el)) return true;
     if (t === 'password' || t === 'email') return true;
-    if (t === 'text' || t === 'tel' || t === 'number' || t === '') {
+    if (t === 'text' || t === 'tel' || t === '') {
       const hint = hintText(el);
       const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
       if (autocomplete.includes('username') || autocomplete.includes('current-password') || autocomplete.includes('new-password')) {
@@ -58,11 +58,16 @@ if (!self.__kpHintsInjected) {
       if (USER_RE.test(hint)) {
         return true;
       }
+      // email-like placeholder (e.g. "ivan@domain.ru") is a strong login signal
+      const ph = (el.getAttribute('placeholder') || '');
+      if (/\S+@\S+\.\S+/.test(ph)) return true;
       // login-first flows without password: single visible text-like input in the form
       const form = el.closest('form');
       if (form) {
+        const action = (form.getAttribute('action') || '').toLowerCase();
+        if (/search/.test(action)) return false;
         const visibles = [...form.querySelectorAll('input')].filter(i => i.offsetParent);
-        const textLikes = visibles.filter(i => ['text', 'email', 'tel', 'number', ''].includes((i.type || '').toLowerCase()));
+        const textLikes = visibles.filter(i => ['text', 'email', 'tel', ''].includes((i.type || '').toLowerCase()));
         if (textLikes.length <= 2 && visibles.some(i => (i.type || '').toLowerCase() === 'submit' || i.tagName === 'BUTTON')) {
           return true;
         }
@@ -409,6 +414,12 @@ if (!self.__kpHintsInjected) {
   /* ---- Reposition on scroll/resize ---- */
   window.addEventListener('scroll', position, true);
   window.addEventListener('resize', position, true);
+
+  /* ---- Initial focus: field may already be focused before script loaded ---- */
+  {
+    const el = document.activeElement;
+    if (el && el.tagName === 'INPUT') openForField(el);
+  }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.cmd === 'hints-open') {
