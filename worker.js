@@ -78,7 +78,14 @@ const storage = { // used by "associate"
 const hints = {
   ready: false,
   preparing: null,
-  async search(url) {
+  reset() {
+    this.ready = false;
+    this.preparing = null;
+  },
+  async ensureReady(force = false) {
+    if (force) {
+      this.reset();
+    }
     if (!this.ready) {
       if (!this.preparing) {
         this.preparing = (async () => {
@@ -99,10 +106,25 @@ const hints = {
       }
       await this.preparing;
     }
-    if (!this.ready) {
-      return {Entries: []};
+  },
+  async search(url, {force = false} = {}) {
+    try {
+      await this.ensureReady(force);
+      if (!this.ready) {
+        return {Entries: []};
+      }
+      return await engine.search({url});
     }
-    return engine.search({url});
+    catch (e) {
+      this.reset();
+      if (!force) {
+        await this.ensureReady(true);
+        if (this.ready) {
+          return engine.search({url});
+        }
+      }
+      throw e;
+    }
   }
 };
 
@@ -188,17 +210,23 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
     return true;
   }
   else if (request.cmd === 'hints-search') {
-    hints.search(request.url).then(r => {
+    hints.search(request.url, {
+      force: request.force === true
+    }).then(r => {
       const entries = (r.Entries || []).map((e, i) => ({
         Login: e.Login || '',
         Name: e.Name || '',
         group: e.group || '',
         originalIndex: i
       }));
-      response({entries});
+      response({entries, ok: true});
     }).catch(e => {
       console.warn('hints-search:', e);
-      response({entries: []});
+      response({
+        entries: [],
+        ok: false,
+        error: e?.message || String(e)
+      });
     });
     return true;
   }
@@ -657,8 +685,7 @@ chrome.runtime.onInstalled.addListener(icon);
 /* in KeePassXC mode check */
 chrome.storage.onChanged.addListener(ps => {
   if (ps.engine) {
-    hints.ready = false;
-    hints.preparing = null;
+    hints.reset();
 
     if (ps.engine.newValue === 'keepassxc') {
       if (typeof chrome.runtime.sendNativeMessage === 'undefined') {

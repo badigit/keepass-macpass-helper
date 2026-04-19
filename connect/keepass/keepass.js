@@ -229,7 +229,7 @@ class KeePass extends SimpleStorage {
       console.warn(e);
       const r = await this.associate();
       if (r && r.Success) {
-        this.search(query);
+        return this.search(query);
       }
       throw Error('Communication is rejected! Is your database open?');
     }

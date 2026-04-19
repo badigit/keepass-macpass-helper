@@ -20,3 +20,8 @@ Helper extension for KeePass to find and insert credentials, generate passwords,
 ### Building
 
 Run `./build.sh` to create a `keepass-helper.zip` package from the repository root.
+
+### Development Notes
+
+- Hints heuristics and their motivating cases: [`docs/hints-heuristics.md`](docs/hints-heuristics.md)
+- Public-safe report triage flow for new hint cases: [`docs/hints-report-flow.md`](docs/hints-report-flow.md)

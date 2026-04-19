@@ -51,3 +51,11 @@ No bundler, transpiler, or package manager — the extension ships raw JS files.
 ## OTP Field Resolution
 
 OTP values are resolved from multiple possible entry fields in this priority: `KPH: otp`, `KPH:otp`, `otp`, `KPOTP`, `KPH: sotp` (encrypted), and built-in KeePass fields (`TimeOtp-Secret-Base32`, `TimeOtp-Period`, `TimeOtp-Length`). This logic lives in `connect/otp-resolve.js` (shared between worker and popup).
+
+## Hints Report Policy
+
+- This repository is public. Do not commit raw `missed` or `unwanted` hints JSON exports from real browsing sessions.
+- Treat hint reports as sensitive because they can contain internal URLs, page titles, search text, and organization-specific field metadata.
+- When adding or adjusting hints heuristics, document the rule boundary in `docs/hints-heuristics.md`.
+- Use `docs/hints-report-flow.md` to sanitize new cases and classify them as `reliable`, `risky`, or `defer`.
+- Only merge heuristics that are narrow, explainable, and supported by a repeatable pattern rather than a one-off site quirk.

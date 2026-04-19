@@ -3,14 +3,18 @@ if (!self.__kpHintsInjected) {
   self.__kpHintsInjected = true;
 
   const USER_RE = /user(name)?|login|email|e-?mail|account|signin|log.?in|логин|почта|аккаунт/i;
-  const OTP_RE = /\botp\b|\b2fa\b|\btwo.?factor\b|\bverification\b|\bone.?time\b|\btotp\b|\bmfa\b|\bcode\b|\bpin\b|\bкод\b/i;
-  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|title|description|command|directory|folder|(?<!user)name$/i;
+  // OTP reports showed that word-boundary matching misses names like "app_totp" and "sudo_app_otp".
+  const OTP_RE = /(^|[^a-z0-9])(otp|2fa|totp|mfa|pin|код)([^a-z0-9]|$)|two.?factor|verification|one.?time|auth(?:entication)?\s?code/i;
+  // Keep this list intentionally conservative: it exists to block known non-auth classes
+  // such as search/filter fields and Bitrix selector inputs ending with "_label".
+  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|find|lookup|title|description|command|directory|folder|поиск|фильтр|найти|искать|_label$|(?<!user)name$/i;
   const CACHE_TTL = 30000;
 
   let host = null;   // Shadow DOM host element
   let shadow = null;  // closed shadow root
   let list = null;    // <div> container for rows
   let entries = [];   // cached search results
+  let visibleEntries = []; // entries currently rendered in the dropdown
   let cacheUrl = '';
   let cacheTime = 0;
   let activeField = null;
@@ -18,13 +22,18 @@ if (!self.__kpHintsInjected) {
   let selectedIdx = -1;
   let closeTimer = null;
   let suppressUntil = 0;
+  const formState = new WeakMap();
 
-  const hintText = el => [
+  const positiveHintText = el => [
     el?.name,
     el?.id,
     el?.getAttribute?.('autocomplete'),
     el?.getAttribute?.('placeholder'),
-    el?.getAttribute?.('aria-label'),
+    el?.getAttribute?.('aria-label')
+  ].filter(Boolean).join(' ');
+
+  const negativeHintText = el => [
+    positiveHintText(el),
     el?.getAttribute?.('inputmode'),
     el?.getAttribute?.('pattern')
   ].filter(Boolean).join(' ');
@@ -35,13 +44,15 @@ if (!self.__kpHintsInjected) {
     if (!['text', 'tel', 'number', ''].includes(t)) return false;
     const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
     if (autocomplete.includes('one-time-code')) return true;
-    return OTP_RE.test(hintText(el));
+    return OTP_RE.test(negativeHintText(el));
   };
 
   const isClearlyNonAuthField = el => {
-    const hint = hintText(el).toLowerCase();
+    const hint = negativeHintText(el).toLowerCase();
     return NON_AUTH_RE.test(hint);
   };
+
+  const isPasswordField = el => Boolean(el && el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'password');
 
   const isLoginField = el => {
     if (!el || el.tagName !== 'INPUT') return false;
@@ -50,7 +61,7 @@ if (!self.__kpHintsInjected) {
     if (isOTPField(el)) return true;
     if (t === 'password' || t === 'email') return true;
     if (t === 'text' || t === 'tel' || t === '') {
-      const hint = hintText(el);
+      const hint = positiveHintText(el);
       const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
       if (autocomplete.includes('username') || autocomplete.includes('current-password') || autocomplete.includes('new-password')) {
         return true;
@@ -76,6 +87,101 @@ if (!self.__kpHintsInjected) {
     return false;
   };
   const hasValue = el => Boolean(el && typeof el.value === 'string' && el.value.trim());
+  const normalizeLogin = value => String(value || '').trim().toLowerCase();
+
+  const formContextRoot = el => {
+    if (!el) return document.body;
+    const form = el.closest('form');
+    if (form) return form;
+
+    let parent = el;
+    for (let i = 0; i < 10; i += 1) {
+      if (parent.parentElement) {
+        parent = parent.parentElement;
+      }
+      else {
+        const root = parent.getRootNode?.();
+        if (root instanceof ShadowRoot && root.host) {
+          parent = root.host;
+        }
+      }
+
+      if (!parent) break;
+      const hasPassword = parent.querySelector?.('input[type=password]');
+      const hasTextLike = parent.querySelector?.('input[type=text],input[type=email],input[type=tel],input:not([type])');
+      if (hasPassword || hasTextLike) {
+        return parent;
+      }
+    }
+    return document.body;
+  };
+
+  const getFormState = el => {
+    const root = formContextRoot(el);
+    let state = formState.get(root);
+    if (!state) {
+      state = {};
+      formState.set(root, state);
+    }
+    return state;
+  };
+
+  const rememberLoginForField = (el, login) => {
+    const normalized = normalizeLogin(login);
+    if (!normalized) return;
+    getFormState(el).preferredLogin = normalized;
+  };
+
+  const inferLoginFromForm = el => {
+    const state = getFormState(el);
+    if (state.preferredLogin) {
+      return state.preferredLogin;
+    }
+
+    const root = formContextRoot(el);
+    const inputs = [...root.querySelectorAll?.('input') || []].filter(input => input !== el && input.offsetParent);
+    const userField = inputs.find(input => {
+      const type = (input.type || '').toLowerCase();
+      if (!['text', 'email', 'tel', ''].includes(type)) return false;
+      return isLoginField(input) && !isPasswordField(input) && !isOTPField(input);
+    });
+
+    const value = normalizeLogin(userField?.value);
+    if (value) {
+      state.preferredLogin = value;
+      return value;
+    }
+    return '';
+  };
+
+  const sortedEntriesForField = (items, el) => {
+    if (!isPasswordField(el)) {
+      return items.slice();
+    }
+
+    const preferredLogin = inferLoginFromForm(el);
+    if (!preferredLogin) {
+      return items.slice();
+    }
+
+    return items
+      .map((entry, index) => {
+        const login = normalizeLogin(entry.Login);
+        let score = 0;
+        if (login === preferredLogin) {
+          score = 3;
+        }
+        else if (login.startsWith(preferredLogin) || preferredLogin.startsWith(login)) {
+          score = 2;
+        }
+        else if (login.includes(preferredLogin) || preferredLogin.includes(login)) {
+          score = 1;
+        }
+        return {entry, index, score};
+      })
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(item => item.entry);
+  };
 
   /* ---- Shadow DOM setup ---- */
   const createHost = () => {
@@ -134,10 +240,15 @@ if (!self.__kpHintsInjected) {
       }
       .kp-footer {
         display: flex;
-        justify-content: flex-end;
+        justify-content: space-between;
         padding: 2px 6px;
         border-top: 1px solid #444;
       }
+      .kp-footer-left {
+        display: flex;
+        gap: 6px;
+      }
+      .kp-footer-btn,
       .kp-report-btn {
         background: none;
         border: 1px solid transparent;
@@ -148,6 +259,7 @@ if (!self.__kpHintsInjected) {
         padding: 2px 6px;
         line-height: 1;
       }
+      .kp-footer-btn:hover { color: #9ec1ff; border-color: #9ec1ff; }
       .kp-report-btn:hover { color: #e55; border-color: #e55; }
       .kp-report-btn.done { color: #5a5; border-color: #5a5; pointer-events: none; }
     `;
@@ -175,6 +287,7 @@ if (!self.__kpHintsInjected) {
     if (!list) return;
     list.innerHTML = '';
     selectedIdx = -1;
+    visibleEntries = items.slice();
 
     if (isOTPField(activeField)) {
       const mode = document.createElement('div');
@@ -221,6 +334,18 @@ if (!self.__kpHintsInjected) {
     // Report "unwanted hint" footer
     const footer = document.createElement('div');
     footer.className = 'kp-footer';
+    const left = document.createElement('div');
+    left.className = 'kp-footer-left';
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'kp-footer-btn';
+    refreshBtn.textContent = 'Refresh';
+    refreshBtn.addEventListener('mousedown', async ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = 'Refreshing...';
+      await refresh();
+    });
     const reportBtn = document.createElement('button');
     reportBtn.className = 'kp-report-btn';
     reportBtn.textContent = '\u2717 not a login field';
@@ -231,7 +356,8 @@ if (!self.__kpHintsInjected) {
       reportBtn.textContent = '\u2713 reported';
       reportBtn.classList.add('done');
     });
-    footer.appendChild(reportBtn);
+    left.appendChild(refreshBtn);
+    footer.append(left, reportBtn);
     list.appendChild(footer);
   };
 
@@ -285,8 +411,11 @@ if (!self.__kpHintsInjected) {
 
   /* ---- Pick entry ---- */
   const pick = idx => {
-    const item = entries[idx];
+    const item = visibleEntries[idx];
     if (!item) return;
+    if (!isPasswordField(activeField) && !isOTPField(activeField)) {
+      rememberLoginForField(activeField, item.Login);
+    }
     // Suppress immediate re-open when autofill shifts focus to password.
     suppressUntil = Date.now() + 600;
     hide();
@@ -336,14 +465,23 @@ if (!self.__kpHintsInjected) {
   };
 
   /* ---- Search with cache ---- */
-  const search = async url => {
-    if (url === cacheUrl && Date.now() - cacheTime < CACHE_TTL) return entries;
+  const search = async (url, opts = {}) => {
+    const force = opts.force === true;
+    if (!force && url === cacheUrl && Date.now() - cacheTime < CACHE_TTL) return entries;
     if (!chrome?.runtime?.id) {
       entries = [];
       return entries;
     }
     try {
-      const r = await chrome.runtime.sendMessage({cmd: 'hints-search', url});
+      const r = await chrome.runtime.sendMessage({cmd: 'hints-search', url, force});
+      if (r && r.ok === false) {
+        entries = [];
+        if (force) {
+          cacheUrl = '';
+          cacheTime = 0;
+        }
+        return entries;
+      }
       entries = (r && r.entries) || [];
       cacheUrl = url;
       cacheTime = Date.now();
@@ -354,8 +492,17 @@ if (!self.__kpHintsInjected) {
     return entries;
   };
 
+  const refresh = async () => {
+    if (!activeField) return;
+    await openForField(activeField, {
+      force: true,
+      refresh: true
+    });
+  };
+
   const openForField = async (el, opts = {}) => {
     const force = opts.force === true;
+    const refreshSearch = opts.refresh === true;
     if (!isLoginField(el)) return;
     if (!force && Date.now() < suppressUntil) return;
     if (!force && hasValue(el)) {
@@ -364,13 +511,15 @@ if (!self.__kpHintsInjected) {
     }
     createHost();
     activeField = el;
-    const items = await search(location.href);
+    const items = await search(location.href, {
+      force: refreshSearch
+    });
     if (!activeField.isConnected) return;
     if (hasValue(activeField)) {
       hide();
       return;
     }
-    render(items);
+    render(sortedEntriesForField(items, activeField));
     show();
   };
 
@@ -381,6 +530,12 @@ if (!self.__kpHintsInjected) {
   }, true);
 
   document.addEventListener('input', e => {
+    if (e.target && e.target.tagName === 'INPUT' && !isPasswordField(e.target) && !isOTPField(e.target)) {
+      const value = normalizeLogin(e.target.value);
+      if (value) {
+        rememberLoginForField(e.target, value);
+      }
+    }
     if (e.target === activeField && hasValue(activeField)) {
       hide();
     }
