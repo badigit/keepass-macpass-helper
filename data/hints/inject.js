@@ -7,7 +7,8 @@ if (!self.__kpHintsInjected) {
   const OTP_RE = /(^|[^a-z0-9])(otp|2fa|totp|mfa|pin|код)([^a-z0-9]|$)|two.?factor|verification|one.?time|auth(?:entication)?\s?code/i;
   // Keep this list intentionally conservative: it exists to block known non-auth classes
   // such as search/filter fields and Bitrix selector inputs ending with "_label".
-  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|find|lookup|title|description|command|directory|folder|поиск|фильтр|найти|искать|_label$|(?<!user)name$/i;
+  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|find|lookup|title|description|command|directory|folder|поиск|фильтр|найти|искать|_label(?:[^a-z0-9]|$)|(?<!user)name$/i;
+  const PHONE_TEXT_RE = /phone|tel(?:ephone)?|номер\s+телефона|телефон/i;
   const CACHE_TTL = 30000;
 
   let host = null;   // Shadow DOM host element
@@ -34,6 +35,7 @@ if (!self.__kpHintsInjected) {
 
   const negativeHintText = el => [
     positiveHintText(el),
+    el?.className,
     el?.getAttribute?.('inputmode'),
     el?.getAttribute?.('pattern')
   ].filter(Boolean).join(' ');
@@ -48,6 +50,11 @@ if (!self.__kpHintsInjected) {
   };
 
   const isClearlyNonAuthField = el => {
+    const autocomplete = (el?.getAttribute?.('autocomplete') || '').toLowerCase();
+    const placeholder = el?.getAttribute?.('placeholder') || '';
+    if (autocomplete.includes('one-time-code') && PHONE_TEXT_RE.test(placeholder)) {
+      return true;
+    }
     const hint = negativeHintText(el).toLowerCase();
     return NON_AUTH_RE.test(hint);
   };
