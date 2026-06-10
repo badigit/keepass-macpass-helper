@@ -129,7 +129,19 @@ passkey.get = async data => {
           new TextEncoder().encode(rpId)
         )); // 32 bytes
 
-        const flagsValue = 0x05; // UP (user present) + UV
+        let flagsValue = 0x05; // UP (user present) + UV (default if no flags stored)
+        if (data.FLAGS && data.FLAGS.length) {
+          const FLAG_BITS = {
+            UP: 0x01,
+            UV: 0x04,
+            BE: 0x08,
+            BS: 0x10,
+            AT: 0x00, // is only included during credential creation
+            ED: 0x80
+          };
+          flagsValue = data.FLAGS.reduce((value, flag) => value | (FLAG_BITS[flag] || 0), 0);
+        }
+
         const flags = new Uint8Array([flagsValue]);
         // If authenticators always keep the counter at zero, the highlighted condition is false
         const signCount = new Uint8Array(4);
