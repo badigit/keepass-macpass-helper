@@ -12,7 +12,21 @@ KeePassHelper is a cross-browser WebExtension (Manifest v3) that integrates KeeP
 ./build.sh        # Creates keepass-helper.zip from repo root
 ```
 
-No bundler, transpiler, or package manager — the extension ships raw JS files. No test framework is configured; testing is manual via browser extension loading.
+No bundler, transpiler, or package manager — the extension ships raw JS files.
+
+## Tests
+
+Pure-JS modules (e.g. `data/hints/heuristics.js`) are covered by `node:test`
+under `tests/`. No deps, just Node 18+:
+
+```bash
+node --test tests/hints-heuristics.test.js tests/form-context.test.js tests/password-gen.test.js
+```
+
+(`node --test tests/` without explicit files trips on Windows path globbing — pass the files individually.)
+
+Anything that touches Chrome APIs or live DOM stays manual via browser extension
+loading.
 
 ## Architecture
 

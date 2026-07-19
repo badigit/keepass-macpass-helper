@@ -22,3 +22,5 @@
 - Use `docs/hints-report-flow.md` for the privacy-safe triage flow.
 - Classify each new pattern as `reliable`, `risky`, or `defer`.
 - Only implement `reliable` patterns in code.
+
+<!-- bd-doctor-divergence: ok -->
