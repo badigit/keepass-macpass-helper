@@ -1,5 +1,13 @@
 # Agent Notes
 
+## Extension Version
+
+- Every user-facing behavior, UI, permission, or runtime change must bump `manifest.json` before the work is considered complete.
+- Use `./bump.sh patch` by default. Use `minor` or `major` only when the scope warrants it or the user requests it.
+- Bump once per logical batch of changes, not once per edited file.
+- Run `./build.sh` after the bump. The build intentionally fails when extension files changed while the manifest version still matches `HEAD`.
+- Documentation, tests, repository metadata, and developer-only tooling changes do not require an extension version bump unless they alter the packaged extension.
+
 ## Hints Reports
 
 - Treat exported `missed` and `unwanted` hints reports as sensitive input.

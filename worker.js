@@ -9,14 +9,23 @@ self.kdbxweb = {};
 
 importScripts(
   '/tools/tld.js',
+  '/tools/url-lookup.js',
   '/connect/SecureSyncedDB.js',
   '/connect/api.js',
   '/connect/keepass/keepass.js',
   '/connect/keepassxc/nacl-fast.min.js',
   '/connect/keepassxc/keepassxc.js',
   '/connect/totp.js',
-  '/connect/otp-resolve.js'
+  '/connect/otp-resolve.js',
+  // Single source of truth for field-detection regexes across content script,
+  // service worker, and node tests. Exposes self.__kpHints.
+  '/data/hints/heuristics.js',
+  // Password generators (charset + diceware). Exposes self.__kpPasswordGen.
+  '/tools/diceware-words.js',
+  '/tools/password-gen.js'
 );
+
+const {searchWithUrlFallback, isLookupCandidate} = self.__kpUrlLookup;
 
 const current = () => chrome.tabs.query({
   lastFocusedWindow: true,
@@ -107,7 +116,7 @@ const hints = {
       await this.preparing;
     }
   },
-  async search(url, {force = false} = {}) {
+  async searchExact(url, {force = false} = {}) {
     try {
       await this.ensureReady(force);
       if (!this.ready) {
@@ -125,6 +134,14 @@ const hints = {
       }
       throw e;
     }
+  },
+  async search(url, {force = false} = {}) {
+    let first = true;
+    return searchWithUrlFallback(candidate => {
+      const candidateForce = force && first;
+      first = false;
+      return this.searchExact(candidate, {force: candidateForce});
+    }, url);
   }
 };
 
@@ -217,7 +234,8 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         Login: e.Login || '',
         Name: e.Name || '',
         group: e.group || '',
-        originalIndex: i
+        originalIndex: e.__kpLookup?.index ?? i,
+        lookupUrl: e.__kpLookup?.url || request.url
       }));
       response({entries, ok: true});
     }).catch(e => {
@@ -234,7 +252,9 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
     (async () => {
       try {
         const tab = sender.tab;
-        const r = await hints.search(request.url);
+        const lookupUrl = isLookupCandidate(request.url, request.lookupUrl) ?
+          request.lookupUrl : request.url;
+        const r = await hints.searchExact(lookupUrl);
         const entry = (r.Entries || [])[request.index];
         if (!entry) {
           return;
@@ -244,33 +264,22 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
           if (!otp) {
             return;
           }
-          // Inject helper.js first — provides setInputValue for OTP fill
+          // Inject helper.js (setInputValue) and heuristics.js (isOTPField) into
+          // the page. The heuristics file is also injected as a content script,
+          // but content scripts live in the isolated world; we need __kpHints in
+          // the main world so the executeScript func below can reach it.
           await chrome.scripting.executeScript({
             target: {tabId: tab.id},
-            files: ['/data/helper.js']
+            files: ['/data/helper.js', '/data/hints/heuristics.js']
           });
           await chrome.scripting.executeScript({
             target: {tabId: tab.id},
             func: otp => {
+              const {isOTPField} = self.__kpHints;
               const active = document.activeElement;
-              const hint = e => ((e?.name || '') + ' ' + (e?.id || '') + ' ' +
-                (e?.getAttribute?.('autocomplete') || '') + ' ' +
-                (e?.getAttribute?.('placeholder') || '') + ' ' +
-                (e?.getAttribute?.('aria-label') || '')).toLowerCase();
-              const otpRe = /otp|2fa|two.?factor|auth|verification|one.?time|totp|mfa|code|token|pin/;
-
-              const isOTP = e => {
-                if (!e || e.tagName !== 'INPUT') return false;
-                const t = (e.type || '').toLowerCase();
-                if (!['text', 'tel', 'number', ''].includes(t)) return false;
-                if ((e.getAttribute('autocomplete') || '').toLowerCase().includes('one-time-code')) return true;
-                return otpRe.test(hint(e));
-              };
-
               const candidates = [...document.querySelectorAll('input')].filter(e => e.offsetParent);
-              const field = isOTP(active) ? active : (candidates.find(isOTP) || active);
+              const field = isOTPField(active) ? active : (candidates.find(isOTPField) || active);
               if (!field || field.tagName !== 'INPUT') return;
-
               self.setInputValue(field, otp);
             },
             args: [otp]
@@ -280,16 +289,18 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         const username = entry.Login || '';
         const password = entry.Password || '';
 
-        // Inject helper.js for detectForm + setInputValue
+        // Inject helper.js (setInputValue/detectForm) and heuristics.js
+        // (USER_RE) into the page's isolated world.
         await chrome.scripting.executeScript({
           target: {tabId: tab.id},
-          files: ['/data/helper.js']
+          files: ['/data/helper.js', '/data/hints/heuristics.js']
         });
 
         // Fill credentials via executeScript — password never touches content script
         await chrome.scripting.executeScript({
           target: {tabId: tab.id},
           func: (username, password) => {
+            const {USER_RE} = self.__kpHints;
             const active = document.activeElement;
             // Find the form context
             const form = self.detectForm
@@ -314,8 +325,8 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
 
             if (username && userFields.length) {
               const target = userFields.find(e => {
-                const hint = (e.name + e.id + (e.getAttribute('autocomplete') || '')).toLowerCase();
-                return /user|login|email|name|account/.test(hint);
+                const hint = e.name + ' ' + e.id + ' ' + (e.getAttribute('autocomplete') || '');
+                return USER_RE.test(hint);
               }) || userFields[0];
               self.setInputValue(target, username);
             }
@@ -424,6 +435,15 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
   chrome.runtime.onStartup.addListener(once);
 }
 
+// Side panel is per-tab and opt-in: we enable it only after the "Save form"
+// context menu sets up its payload. Manifest declares default_path so the API
+// is available; this disables the global panel so the icon doesn't surface an
+// empty form on tabs the user didn't trigger.
+chrome.sidePanel?.setOptions?.({enabled: false}).catch(() => {});
+chrome.tabs.onRemoved.addListener(tabId => {
+  chrome.storage.session.remove('kp-save-form:' + tabId).catch(() => {});
+});
+
 // Register hints content script
 {
   const registerHints = async () => {
@@ -435,7 +455,12 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       await chrome.scripting.registerContentScripts([{
         id: 'kp-hints',
         matches: ['<all_urls>'],
-        js: ['/data/hints/inject.js'],
+        js: [
+          '/data/hints/heuristics.js',
+          '/data/hints/form-context.js',
+          '/data/hints/ignored-fields.js',
+          '/data/hints/inject.js'
+        ],
         runAt: 'document_idle',
         allFrames: true
       }]);
@@ -449,29 +474,52 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
   registerHints();
 }
 
+// Pages we cannot script into: chrome://, edge://, the Chrome Web Store,
+// view-source:, about:blank, and similar. Bail out with a friendly badge
+// instead of letting chrome.scripting throw "Cannot access a chrome:// URL".
+const RESTRICTED_URL_RE = /^(chrome|edge|about|view-source|chrome-extension|moz-extension|chrome-search|chrome-devtools|devtools):|^https?:\/\/chromewebstore\.google\.com/i;
+const isScriptable = url => !!url && !RESTRICTED_URL_RE.test(url);
+
 const onCommand = async (info, tab) => {
   tab = tab || await current();
 
   if (info.menuItemId === 'save-form') {
-    const target = {
-      tabId: tab.id
-    };
+    if (!isScriptable(tab.url)) {
+      notify(tab, 'Not available on this page', '–', '#888');
+      return;
+    }
+    const target = {tabId: tab.id};
+    const sessionKey = 'kp-save-form:' + tab.id;
+
+    // sidePanel.open() must be called inside the same user-gesture turn — so
+    // BEFORE any await. The panel will read storage.session on load and also
+    // listen for changes; the heavy lifting (injecting helper, scraping form
+    // fields) happens after, asynchronously.
+    try {
+      chrome.sidePanel.setOptions({
+        tabId: tab.id,
+        path: '/data/save/index.html?tab=' + tab.id,
+        enabled: true
+      });
+      chrome.sidePanel.open({tabId: tab.id}).catch(e => console.warn('sidePanel.open:', e));
+    }
+    catch (e) {
+      console.warn('sidePanel setup:', e);
+    }
+
+    // Seed an empty payload so the side panel doesn't render with the URL of
+    // an earlier tab if storage happens to be stale.
+    chrome.storage.session.set({[sessionKey]: {pairs: [], url: tab.url}}).catch(() => {});
 
     try {
       await chrome.scripting.executeScript({
-        target: {
-          ...target,
-          allFrames: true
-        },
+        target: {...target, allFrames: true},
         files: ['/data/helper.js']
       });
 
-      // collect logins
+      // collect logins from all frames
       const r = await chrome.scripting.executeScript({
-        target: {
-          ...target,
-          allFrames: true
-        },
+        target: {...target, allFrames: true},
         func: () => {
           const inputs = document.extendedQuerySelectorAll('input[type=password]');
           const forms = inputs
@@ -484,33 +532,14 @@ const onCommand = async (info, tab) => {
               ...f.extendedQuerySelectorAll('input[type=email]')
             ].flat().map(e => e.value).filter(s => s);
             const passwords = inputs.map(e => e.value).filter(s => s);
-
-            return {
-              usernames,
-              passwords
-            };
+            return {usernames, passwords};
           });
         }
       });
-
       const pairs = r.map(o => o.result).flat().filter(a => a);
 
-      await chrome.scripting.executeScript({
-        target,
-        func: pairs => {
-          window.pairs = pairs;
-        },
-        args: [pairs]
-      });
-
-      await chrome.scripting.insertCSS({
-        target,
-        files: ['/data/save/inject.css']
-      });
-      await chrome.scripting.executeScript({
-        target,
-        files: ['/data/save/inject.js']
-      });
+      // Push final payload; storage.onChanged in the panel re-renders.
+      await chrome.storage.session.set({[sessionKey]: {pairs, url: tab.url}});
     }
     catch (e) {
       console.warn(e);
@@ -526,6 +555,10 @@ const onCommand = async (info, tab) => {
     });
   }
   else if (info.menuItemId === 'encrypt-data') {
+    if (!isScriptable(tab.url)) {
+      notify(tab, 'Not available on this page', '–', '#888');
+      return;
+    }
     try {
       const target = {
         tabId: tab.id
@@ -550,35 +583,13 @@ const onCommand = async (info, tab) => {
       'length-1': 10,
       'length-2': 2
     }, prefs => {
-      const password = [];
-
-      {
-        const array = new Uint8Array(prefs['length-1']);
-        crypto.getRandomValues(array);
-
-        for (const byte of array) {
-          const n = byte % prefs['charset-1'].length;
-          password.push(prefs['charset-1'][n] || '-');
-        }
-      }
-      if (prefs['length-2']) {
-        const array = new Uint8Array(prefs['length-2']);
-        crypto.getRandomValues(array);
-
-        for (const byte of array) {
-          const n = byte % prefs['charset-2'].length;
-          password.push(prefs['charset-2'][n] || '-');
-        }
-      }
-      // Shuffle the middle items using Fisher-Yates algorithm
-      const [first, ...rest] = password;
-      for (let i = rest.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [rest[i], rest[j]] = [rest[j], rest[i]];
-      }
-
-      // copy to clipboard
-      copy([first, ...rest].join(''), tab);
+      const password = self.__kpPasswordGen.charset({
+        charset1: prefs['charset-1'],
+        charset2: prefs['charset-2'],
+        length1: prefs['length-1'],
+        length2: prefs['length-2']
+      });
+      copy(password, tab);
     });
   }
   else if (info.menuItemId === 'auto-login') {
@@ -724,3 +735,7 @@ chrome.storage.onChanged.addListener(ps => {
     setUninstallURL(page + '?rd=feedback&name=' + encodeURIComponent(name) + '&version=' + version);
   }
 }
+
+
+
+

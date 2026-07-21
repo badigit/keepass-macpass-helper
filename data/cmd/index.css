@@ -117,9 +117,39 @@ div {
   align-items: center;
   margin: 0 0 var(--gap) 0;
 }
+#toolbar .credential-action {
+  display: flex;
+  align-items: center;
+}
 #toolbar button,
 #toolbar input {
   padding: var(--gap);
+}
+#toolbar .copy-action {
+  position: relative;
+  width: 26px;
+  height: 30px;
+  padding: 0;
+  flex: 0 0 26px;
+}
+#toolbar .copy-action::before,
+#toolbar .copy-action::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 10px;
+  border: solid 1px currentColor;
+  border-radius: 1px;
+  box-sizing: border-box;
+}
+#toolbar .copy-action::before {
+  left: 8px;
+  top: 7px;
+}
+#toolbar .copy-action::after {
+  left: 11px;
+  top: 10px;
+  background-color: var(--bg-alt);
 }
 #toolbar button:focus,
 #toolbar input:focus {

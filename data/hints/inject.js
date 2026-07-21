@@ -1,14 +1,23 @@
-/* KeePass Helper — inline autocomplete dropdown (content script) */
+/* KeePass Helper — inline autocomplete dropdown (content script).
+ *
+ * Field-detection heuristics live in data/hints/heuristics.js (loaded before
+ * this file via manifest content_scripts) and are exposed as self.__kpHints. */
 if (!self.__kpHintsInjected) {
   self.__kpHintsInjected = true;
 
-  const USER_RE = /user(name)?|login|email|e-?mail|account|signin|log.?in|логин|почта|аккаунт/i;
-  // OTP reports showed that word-boundary matching misses names like "app_totp" and "sudo_app_otp".
-  const OTP_RE = /(^|[^a-z0-9])(otp|2fa|totp|mfa|pin|код)([^a-z0-9]|$)|two.?factor|verification|one.?time|auth(?:entication)?\s?code/i;
-  // Keep this list intentionally conservative: it exists to block known non-auth classes
-  // such as search/filter fields and Bitrix selector inputs ending with "_label".
-  const NON_AUTH_RE = /lang|language|locale|translation|translate|i18n|l10n|currency|timezone|time.?zone|city|country|address|comment|search|filter|query|find|lookup|title|description|command|directory|folder|поиск|фильтр|найти|искать|_label(?:[^a-z0-9]|$)|(?<!user)name$/i;
-  const PHONE_TEXT_RE = /phone|tel(?:ephone)?|номер\s+телефона|телефон/i;
+  const {isOTPField, isPasswordField, isLoginField} = self.__kpHints;
+  const {
+    normalizeLogin,
+    createFormStateStore,
+    rememberLoginForField: rememberLoginForFieldImpl,
+    sortedEntriesForField: sortedEntriesForFieldImpl
+  } = self.__kpFormContext;
+  const {
+    STORAGE_KEY: IGNORED_FIELDS_STORAGE_KEY,
+    MAX_IGNORED_FIELDS,
+    ignoredFieldKey
+  } = self.__kpIgnoredFields;
+
   const CACHE_TTL = 30000;
 
   let host = null;   // Shadow DOM host element
@@ -23,172 +32,34 @@ if (!self.__kpHintsInjected) {
   let selectedIdx = -1;
   let closeTimer = null;
   let suppressUntil = 0;
-  const formState = new WeakMap();
+  const formStateStore = createFormStateStore();
+  let ignoredFields = new Set();
 
-  const positiveHintText = el => [
-    el?.name,
-    el?.id,
-    el?.getAttribute?.('autocomplete'),
-    el?.getAttribute?.('placeholder'),
-    el?.getAttribute?.('aria-label')
-  ].filter(Boolean).join(' ');
-
-  const negativeHintText = el => [
-    positiveHintText(el),
-    el?.className,
-    el?.getAttribute?.('inputmode'),
-    el?.getAttribute?.('pattern')
-  ].filter(Boolean).join(' ');
-
-  const isOTPField = el => {
-    if (!el || el.tagName !== 'INPUT') return false;
-    const t = (el.type || '').toLowerCase();
-    if (!['text', 'tel', 'number', ''].includes(t)) return false;
-    const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
-    if (autocomplete.includes('one-time-code')) return true;
-    return OTP_RE.test(negativeHintText(el));
-  };
-
-  const isClearlyNonAuthField = el => {
-    const autocomplete = (el?.getAttribute?.('autocomplete') || '').toLowerCase();
-    const placeholder = el?.getAttribute?.('placeholder') || '';
-    if (autocomplete.includes('one-time-code') && PHONE_TEXT_RE.test(placeholder)) {
-      return true;
+  const loadIgnoredFields = async () => {
+    try {
+      if (!chrome?.runtime?.id) return;
+      const stored = await chrome.storage.local.get(IGNORED_FIELDS_STORAGE_KEY);
+      const keys = stored[IGNORED_FIELDS_STORAGE_KEY];
+      ignoredFields = new Set(Array.isArray(keys) ? keys.filter(key => typeof key === 'string') : []);
     }
-    const hint = negativeHintText(el).toLowerCase();
-    return NON_AUTH_RE.test(hint);
+    catch {}
+  };
+  const ignoredFieldsReady = loadIgnoredFields();
+
+  const keyForField = el => ignoredFieldKey(el, location.origin);
+  const isIgnoredField = el => ignoredFields.has(keyForField(el));
+  const rememberIgnoredField = el => {
+    const key = keyForField(el);
+    if (!key || ignoredFields.has(key)) return;
+    ignoredFields.add(key);
+    const keys = [...ignoredFields].slice(-MAX_IGNORED_FIELDS);
+    ignoredFields = new Set(keys);
+    chrome.storage.local.set({[IGNORED_FIELDS_STORAGE_KEY]: keys}).catch(() => {});
   };
 
-  const isPasswordField = el => Boolean(el && el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'password');
-
-  const isLoginField = el => {
-    if (!el || el.tagName !== 'INPUT') return false;
-    if (isClearlyNonAuthField(el)) return false;
-    const t = (el.type || '').toLowerCase();
-    if (isOTPField(el)) return true;
-    if (t === 'password' || t === 'email') return true;
-    if (t === 'text' || t === 'tel' || t === '') {
-      const hint = positiveHintText(el);
-      const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
-      if (autocomplete.includes('username') || autocomplete.includes('current-password') || autocomplete.includes('new-password')) {
-        return true;
-      }
-      if (USER_RE.test(hint)) {
-        return true;
-      }
-      // email-like placeholder (e.g. "ivan@domain.ru") is a strong login signal
-      const ph = (el.getAttribute('placeholder') || '');
-      if (/\S+@\S+\.\S+/.test(ph)) return true;
-      // login-first flows without password: single visible text-like input in the form
-      const form = el.closest('form');
-      if (form) {
-        const action = (form.getAttribute('action') || '').toLowerCase();
-        if (/search/.test(action)) return false;
-        const visibles = [...form.querySelectorAll('input')].filter(i => i.offsetParent);
-        const textLikes = visibles.filter(i => ['text', 'email', 'tel', ''].includes((i.type || '').toLowerCase()));
-        if (textLikes.length <= 2 && visibles.some(i => (i.type || '').toLowerCase() === 'submit' || i.tagName === 'BUTTON')) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
   const hasValue = el => Boolean(el && typeof el.value === 'string' && el.value.trim());
-  const normalizeLogin = value => String(value || '').trim().toLowerCase();
-
-  const formContextRoot = el => {
-    if (!el) return document.body;
-    const form = el.closest('form');
-    if (form) return form;
-
-    let parent = el;
-    for (let i = 0; i < 10; i += 1) {
-      if (parent.parentElement) {
-        parent = parent.parentElement;
-      }
-      else {
-        const root = parent.getRootNode?.();
-        if (root instanceof ShadowRoot && root.host) {
-          parent = root.host;
-        }
-      }
-
-      if (!parent) break;
-      const hasPassword = parent.querySelector?.('input[type=password]');
-      const hasTextLike = parent.querySelector?.('input[type=text],input[type=email],input[type=tel],input:not([type])');
-      if (hasPassword || hasTextLike) {
-        return parent;
-      }
-    }
-    return document.body;
-  };
-
-  const getFormState = el => {
-    const root = formContextRoot(el);
-    let state = formState.get(root);
-    if (!state) {
-      state = {};
-      formState.set(root, state);
-    }
-    return state;
-  };
-
-  const rememberLoginForField = (el, login) => {
-    const normalized = normalizeLogin(login);
-    if (!normalized) return;
-    getFormState(el).preferredLogin = normalized;
-  };
-
-  const inferLoginFromForm = el => {
-    const state = getFormState(el);
-    if (state.preferredLogin) {
-      return state.preferredLogin;
-    }
-
-    const root = formContextRoot(el);
-    const inputs = [...root.querySelectorAll?.('input') || []].filter(input => input !== el && input.offsetParent);
-    const userField = inputs.find(input => {
-      const type = (input.type || '').toLowerCase();
-      if (!['text', 'email', 'tel', ''].includes(type)) return false;
-      return isLoginField(input) && !isPasswordField(input) && !isOTPField(input);
-    });
-
-    const value = normalizeLogin(userField?.value);
-    if (value) {
-      state.preferredLogin = value;
-      return value;
-    }
-    return '';
-  };
-
-  const sortedEntriesForField = (items, el) => {
-    if (!isPasswordField(el)) {
-      return items.slice();
-    }
-
-    const preferredLogin = inferLoginFromForm(el);
-    if (!preferredLogin) {
-      return items.slice();
-    }
-
-    return items
-      .map((entry, index) => {
-        const login = normalizeLogin(entry.Login);
-        let score = 0;
-        if (login === preferredLogin) {
-          score = 3;
-        }
-        else if (login.startsWith(preferredLogin) || preferredLogin.startsWith(login)) {
-          score = 2;
-        }
-        else if (login.includes(preferredLogin) || preferredLogin.includes(login)) {
-          score = 1;
-        }
-        return {entry, index, score};
-      })
-      .sort((a, b) => b.score - a.score || a.index - b.index)
-      .map(item => item.entry);
-  };
+  const rememberLoginForField = (el, login) => rememberLoginForFieldImpl(formStateStore, el, login);
+  const sortedEntriesForField = (items, el) => sortedEntriesForFieldImpl(items, el, formStateStore);
 
   /* ---- Shadow DOM setup ---- */
   const createHost = () => {
@@ -241,13 +112,30 @@ if (!self.__kpHintsInjected) {
         color: #ddd;
       }
       .kp-empty {
-        padding: 6px 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
         color: #999;
         text-align: center;
       }
+      .kp-empty-action {
+        background: none;
+        border: 1px solid #666;
+        border-radius: 3px;
+        color: #bbb;
+        font-size: 11px;
+        cursor: pointer;
+        padding: 3px 8px;
+      }
+      .kp-empty-action:hover { color: #fff; border-color: #aaa; }
       .kp-footer {
         display: flex;
         justify-content: space-between;
+        position: sticky;
+        bottom: 0;
+        background: #333;
         padding: 2px 6px;
         border-top: 1px solid #444;
       }
@@ -308,9 +196,21 @@ if (!self.__kpHintsInjected) {
     if (!items.length) {
       const d = document.createElement('div');
       d.className = 'kp-empty';
-      d.textContent = 'No credentials found';
+      const message = document.createElement('span');
+      message.textContent = 'No credentials found';
+      const ignoreBtn = document.createElement('button');
+      ignoreBtn.className = 'kp-empty-action';
+      ignoreBtn.textContent = 'Hide for this field';
+      ignoreBtn.title = 'Do not show KeePass hints for this field on this site';
+      ignoreBtn.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const field = activeField;
+        rememberIgnoredField(field);
+        reportUnwanted(field);
+      });
+      d.append(message, ignoreBtn);
       list.appendChild(d);
-      return;
     }
     items.forEach((e, i) => {
       const row = document.createElement('div');
@@ -338,7 +238,8 @@ if (!self.__kpHintsInjected) {
       });
     });
 
-    // Report "unwanted hint" footer
+    // Persistently ignore this field on this site and also retain a diagnostic
+    // report. The footer is deliberately rendered even for an empty result.
     const footer = document.createElement('div');
     footer.className = 'kp-footer';
     const left = document.createElement('div');
@@ -355,16 +256,18 @@ if (!self.__kpHintsInjected) {
     });
     const reportBtn = document.createElement('button');
     reportBtn.className = 'kp-report-btn';
-    reportBtn.textContent = '\u2717 not a login field';
+    reportBtn.textContent = isOTPField(activeField) ? 'Hide for this field' : '\u2717 not a login field';
+    reportBtn.title = 'Do not show KeePass hints for this field on this site';
     reportBtn.addEventListener('mousedown', ev => {
       ev.preventDefault();
       ev.stopPropagation();
-      reportUnwanted();
-      reportBtn.textContent = '\u2713 reported';
-      reportBtn.classList.add('done');
+      const field = activeField;
+      rememberIgnoredField(field);
+      reportUnwanted(field);
     });
     left.appendChild(refreshBtn);
-    footer.append(left, reportBtn);
+    footer.appendChild(left);
+    if (items.length) footer.appendChild(reportBtn);
     list.appendChild(footer);
   };
 
@@ -392,8 +295,8 @@ if (!self.__kpHintsInjected) {
     };
   };
 
-  const reportUnwanted = () => {
-    const meta = collectFieldMeta(activeField);
+  const reportUnwanted = field => {
+    const meta = collectFieldMeta(field);
     meta.reportType = 'unwanted';
     hide();
     try {
@@ -416,6 +319,13 @@ if (!self.__kpHintsInjected) {
     selectedIdx = -1;
   };
 
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local' || !changes[IGNORED_FIELDS_STORAGE_KEY]) return;
+    const keys = changes[IGNORED_FIELDS_STORAGE_KEY].newValue;
+    ignoredFields = new Set(Array.isArray(keys) ? keys.filter(key => typeof key === 'string') : []);
+    if (activeField && isIgnoredField(activeField)) hide();
+  });
+
   /* ---- Pick entry ---- */
   const pick = idx => {
     const item = visibleEntries[idx];
@@ -434,6 +344,7 @@ if (!self.__kpHintsInjected) {
       chrome.runtime.sendMessage({
         cmd: 'hints-fill',
         index: item.originalIndex,
+        lookupUrl: item.lookupUrl,
         target: isOTPField(activeField) ? 'otp' : 'credentials',
         url: location.href
       }).catch(() => {});
@@ -511,6 +422,11 @@ if (!self.__kpHintsInjected) {
     const force = opts.force === true;
     const refreshSearch = opts.refresh === true;
     if (!isLoginField(el)) return;
+    await ignoredFieldsReady;
+    if (isIgnoredField(el)) {
+      if (el === activeField) hide();
+      return;
+    }
     if (!force && Date.now() < suppressUntil) return;
     if (!force && hasValue(el)) {
       hide();

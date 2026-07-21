@@ -29,12 +29,18 @@ To close this database, use the right-click context menu over the action button"
     <input type="button" value="Check Remote Frames">
   </div>
   <div id="toolbar">
-    <button title="To insert the selected username either:
+    <div class="credential-action">
+      <button title="To insert the selected username either:
   - Press {{shortcut-insert-login}}
   - Click on the button" data-cmd="insert-login" disabled><u>U</u>sername</button>
-    <button title="To insert the selected password either:
+      <button class="copy-action" title="Copy the selected username to the clipboard" aria-label="Copy username" data-cmd="copy-login" disabled></button>
+    </div>
+    <div class="credential-action">
+      <button title="To insert the selected password either:
   - Press {{shortcut-insert-password}}
   - Click on the button" data-cmd="insert-password" disabled><u>P</u>assword</button>
+      <button class="copy-action" title="Copy the selected password to the clipboard" aria-label="Copy password" data-cmd="copy-password" disabled></button>
+    </div>
     <button title="To perform {USERNAME}{TAB}{PASSWORD}{ENTER} sequence either:
   - Click on the button
   - Press {{shortcut-insert-both}}
@@ -49,8 +55,6 @@ To perform {USERNAME}{TAB}{PASSWORD} sequence either:
 
   - Backspace
   - Delete" disabled data-cmd="delete">Delete</button>
-    -
-    <input type="button" value="Copy (C/X)" title="To copy username to the clipboard either:&#013;  - Press {{shortcut-copy}}&#013;  - Click on the button&#013;&#013;To copy password to the clipboard either:&#013;  - Press {{shortcut-password}}&#013;  - Meta + Click the button" data-cmd="copy" disabled>
   </div>
   <div id="host-access" hbox class="hidden">
     <div>
@@ -70,6 +74,7 @@ To perform {USERNAME}{TAB}{PASSWORD} sequence either:
   <script src="components/list-view.js"></script>
   <script src="components/notification-view.js"></script>
   <script src="/tools/tld.js"></script>
+  <script src="/tools/url-lookup.js"></script>
   <script src="/connect/SecureSyncedDB.js"></script>
   <script src="/connect/api.js"></script>
   <script src="/connect/keepass/keepass.js"></script>

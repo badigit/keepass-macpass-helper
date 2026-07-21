@@ -1,6 +1,8 @@
 /* global engine, Safe */
 'use strict';
 
+const {searchWithUrlFallback} = self.__kpUrlLookup;
+
 const list = document.getElementById('list');
 const search = document.querySelector('input[type=search]');
 const psbox = document.getElementById('password-needed');
@@ -212,9 +214,10 @@ async function submit() {
   });
 
   try {
-    const response = await engine.search({
-      url: query
-    });
+    const response = await searchWithUrlFallback(
+      candidate => engine.search({url: candidate}),
+      query
+    );
 
     // hide group and title columns if no data available
     document.getElementById('group').setAttribute('width', response.Entries.some(o => o.group) ? '1fr' : '0');
@@ -614,8 +617,8 @@ document.addEventListener('click', async e => {
       }
       window.close();
     }
-    else if (cmd && cmd.startsWith('copy')) {
-      if (e.detail === 'password' || alt) {
+    else if (cmd === 'copy-login' || cmd === 'copy-password') {
+      if (cmd === 'copy-password') {
         copy(list.selectedValues.map(a => a[0].password).join('\n'));
       }
       else {

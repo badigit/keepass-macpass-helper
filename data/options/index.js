@@ -429,6 +429,24 @@ document.getElementById('ssdb-clear').onclick = () => {
   };
 }
 
+// Fields persistently hidden through "not a login field"
+{
+  const updateCount = () => {
+    chrome.storage.local.get('hintsIgnoredFields', ({hintsIgnoredFields = []}) => {
+      document.getElementById('hints-ignored-count').textContent =
+        hintsIgnoredFields.length ? `(${hintsIgnoredFields.length} fields)` : '(empty)';
+    });
+  };
+  updateCount();
+
+  document.getElementById('hints-ignored-clear').onclick = () => {
+    chrome.storage.local.remove('hintsIgnoredFields', () => {
+      toast('Ignored fields cleared');
+      updateCount();
+    });
+  };
+}
+
 document.getElementById('keepassxc-manifest').onclick = () => {
   const path =
     navigator.platform.startsWith('Win') ?

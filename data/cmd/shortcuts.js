@@ -62,18 +62,13 @@
 
   const commands = {
     'copy': () => {
-      document.querySelector('[data-cmd="copy"]').click();
+      document.querySelector('[data-cmd="copy-login"]').click();
     },
     'otp': () => {
       document.querySelector('[data-cmd="otp"]').click();
     },
     'password': () => {
-      document.querySelector('[data-cmd="copy"]').dispatchEvent(
-        new CustomEvent('click', {
-          'detail': 'password',
-          'bubbles': true
-        })
-      );
+      document.querySelector('[data-cmd="copy-password"]').click();
     },
     'insert-both': () => {
       document.querySelector('[data-cmd="insert-both"]').click();

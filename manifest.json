@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "version": "0.8.7",
+  "version": "0.8.9",
   "name": "KeePassHelper Password Manager",
   "description": "__MSG_description__",
   "default_locale": "en",
@@ -8,7 +8,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "sidePanel"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -21,12 +22,15 @@
   },
   "content_scripts": [{
     "matches": ["<all_urls>"],
-    "js": ["/data/hints/inject.js"],
+    "js": ["/data/hints/heuristics.js", "/data/hints/form-context.js", "/data/hints/ignored-fields.js", "/data/hints/inject.js"],
     "run_at": "document_idle",
     "all_frames": true
   }],
   "action": {
     "default_popup": "/data/cmd/index.html"
+  },
+  "side_panel": {
+    "default_path": "/data/save/index.html"
   },
   "icons": {
     "16": "/data/icons/16.png",
