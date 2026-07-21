@@ -142,6 +142,20 @@ const hints = {
       first = false;
       return this.searchExact(candidate, {force: candidateForce});
     }, url);
+  },
+  async manualSearch(query) {
+    await this.ensureReady();
+    if (!this.ready || engine.type !== 'keepass' || !engine.core.customSearch) {
+      throw Error('Manual database search requires KeePassHTTP 2.3.1 or newer');
+    }
+    return engine.core.customSearch(query);
+  },
+  async getByUuid(uuid) {
+    await this.ensureReady();
+    if (!this.ready || engine.type !== 'keepass' || !engine.core.getByUuid) {
+      throw Error('UUID lookup requires KeePassHTTP 2.3.1 or newer');
+    }
+    return engine.core.getByUuid(uuid);
   }
 };
 
@@ -248,14 +262,45 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
     });
     return true;
   }
+  else if (request.cmd === 'hints-manual-search') {
+    const query = String(request.query || '').trim().slice(0, 200);
+    if (query.length < 2) {
+      response({entries: [], ok: true});
+      return false;
+    }
+    hints.manualSearch(query).then(r => {
+      const entries = (r.Entries || []).map(e => ({
+        Login: e.Login || '',
+        Name: e.Name || '',
+        group: e.Group?.Name || '',
+        uuid: e.Uuid || ''
+      })).filter(e => e.uuid);
+      response({entries, ok: true});
+    }).catch(e => {
+      console.warn('hints-manual-search:', e);
+      response({
+        entries: [],
+        ok: false,
+        error: e?.message || String(e)
+      });
+    });
+    return true;
+  }
   else if (request.cmd === 'hints-fill') {
     (async () => {
       try {
         const tab = sender.tab;
-        const lookupUrl = isLookupCandidate(request.url, request.lookupUrl) ?
-          request.lookupUrl : request.url;
-        const r = await hints.searchExact(lookupUrl);
-        const entry = (r.Entries || [])[request.index];
+        let entry;
+        if (request.uuid) {
+          const r = await hints.getByUuid(request.uuid);
+          entry = (r.Entries || [])[0];
+        }
+        else {
+          const lookupUrl = isLookupCandidate(request.url, request.lookupUrl) ?
+            request.lookupUrl : request.url;
+          const r = await hints.searchExact(lookupUrl);
+          entry = (r.Entries || [])[request.index];
+        }
         if (!entry) {
           return;
         }

@@ -32,6 +32,9 @@ if (!self.__kpHintsInjected) {
   let selectedIdx = -1;
   let closeTimer = null;
   let suppressUntil = 0;
+  let manualQuery = '';
+  let manualSearchTimer = null;
+  let manualSearchSequence = 0;
   const formStateStore = createFormStateStore();
   let ignoredFields = new Set();
 
@@ -98,6 +101,27 @@ if (!self.__kpHintsInjected) {
       }
       .kp-row > span { overflow: hidden; text-overflow: ellipsis; }
       .kp-row:hover, .kp-row.active { background: #4875bf; color: #fff; }
+      .kp-search {
+        display: flex;
+        position: sticky;
+        top: 0;
+        padding: 6px;
+        background: #333;
+        border-bottom: 1px solid #444;
+        z-index: 1;
+      }
+      .kp-search input {
+        box-sizing: border-box;
+        width: 100%;
+        border: 1px solid #666;
+        border-radius: 3px;
+        background: #222;
+        color: #eee;
+        font: inherit;
+        padding: 5px 7px;
+        outline: none;
+      }
+      .kp-search input:focus { border-color: #9ec1ff; }
       .kp-mode {
         display: flex;
         justify-content: flex-end;
@@ -183,6 +207,32 @@ if (!self.__kpHintsInjected) {
     list.innerHTML = '';
     selectedIdx = -1;
     visibleEntries = items.slice();
+
+    if (!items.length || manualQuery) {
+      const searchWrap = document.createElement('div');
+      searchWrap.className = 'kp-search';
+      const searchInput = document.createElement('input');
+      searchInput.type = 'search';
+      searchInput.placeholder = 'Search KeePass by login, title or URL';
+      searchInput.value = manualQuery;
+      searchInput.setAttribute('aria-label', searchInput.placeholder);
+      searchInput.addEventListener('mousedown', ev => ev.stopPropagation());
+      searchInput.addEventListener('keydown', ev => {
+        ev.stopPropagation();
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          activeField?.focus();
+          hide();
+        }
+      });
+      searchInput.addEventListener('input', () => {
+        manualQuery = searchInput.value.trim();
+        clearTimeout(manualSearchTimer);
+        manualSearchTimer = setTimeout(runManualSearch, 250);
+      });
+      searchWrap.appendChild(searchInput);
+      list.appendChild(searchWrap);
+    }
 
     if (isOTPField(activeField)) {
       const mode = document.createElement('div');
@@ -344,6 +394,7 @@ if (!self.__kpHintsInjected) {
       chrome.runtime.sendMessage({
         cmd: 'hints-fill',
         index: item.originalIndex,
+        uuid: item.uuid,
         lookupUrl: item.lookupUrl,
         target: isOTPField(activeField) ? 'otp' : 'credentials',
         url: location.href
@@ -418,6 +469,38 @@ if (!self.__kpHintsInjected) {
     });
   };
 
+  const runManualSearch = async () => {
+    const query = manualQuery;
+    const sequence = ++manualSearchSequence;
+    if (!query) {
+      render(sortedEntriesForField(entries, activeField));
+      shadow.querySelector('.kp-search input')?.focus();
+      return;
+    }
+    if (query.length < 2) {
+      render([]);
+      shadow.querySelector('.kp-search input')?.focus();
+      return;
+    }
+    try {
+      const r = await chrome.runtime.sendMessage({cmd: 'hints-manual-search', query});
+      if (sequence !== manualSearchSequence || query !== manualQuery) return;
+      const items = r?.ok ? (r.entries || []) : [];
+      render(sortedEntriesForField(items, activeField));
+      const input = shadow.querySelector('.kp-search input');
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    }
+    catch {
+      if (sequence === manualSearchSequence) {
+        render([]);
+        shadow.querySelector('.kp-search input')?.focus();
+      }
+    }
+  };
+
   const openForField = async (el, opts = {}) => {
     const force = opts.force === true;
     const refreshSearch = opts.refresh === true;
@@ -437,6 +520,7 @@ if (!self.__kpHintsInjected) {
     const items = await search(location.href, {
       force: refreshSearch
     });
+    manualQuery = '';
     if (!activeField.isConnected) return;
     if (hasValue(activeField)) {
       hide();
@@ -474,7 +558,10 @@ if (!self.__kpHintsInjected) {
   /* ---- Close on focusout (with delay to allow row clicks) ---- */
   document.addEventListener('focusout', () => {
     clearTimeout(closeTimer);
-    closeTimer = setTimeout(hide, 150);
+    closeTimer = setTimeout(() => {
+      if (host && document.activeElement === host) return;
+      hide();
+    }, 150);
   }, true);
 
   /* ---- Close on outside mousedown ---- */

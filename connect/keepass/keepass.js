@@ -178,33 +178,67 @@ class KeePass extends SimpleStorage {
       'Realm': realm
     }, undefined, true, ['Url', 'SubmitUrl', 'Realm']);
     
-    console.log('KeePassHttp Debug - Исходный ответ:', r);
-    
-    if (r && r.Entries) {
-      const iv = KeePass.s2u(atob(r.Nonce));
+    return this.decryptEntries(r);
+  }
+  async decryptEntries(r) {
+    if (!r || !r.Entries || !r.Nonce) {
+      return r;
+    }
+    const iv = KeePass.s2u(atob(r.Nonce));
+    const d = await this.decrypt(iv);
+    const decryptProperty = async (object, name) => {
+      if (object && object[name]) {
+        object[name] = await d(object[name]);
+      }
+    };
 
-      const d = await this.decrypt(iv);
+    for (const e of r.Entries) {
+      await decryptProperty(e, 'Login');
+      await decryptProperty(e, 'Name');
+      await decryptProperty(e, 'Password');
+      await decryptProperty(e, 'Uuid');
+      await decryptProperty(e.Group, 'Name');
+      await decryptProperty(e.Group, 'Uuid');
 
-      for (let n = 0; n < r.Entries.length; n += 1) {
-        const e = r.Entries[n];
-
-        e.Login = await d(e.Login);
-        e.Name = await d(e.Name);
-        e.Password = await d(e.Password);
-
-        console.log(`KeePassHttp Debug - Запись ${n}:`, e.Name);
-        console.log(`KeePassHttp Debug - StringFields до декодирования:`, e.StringFields);
-
-        for (let m = 0; m < (e.StringFields || []).length; m += 1) {
-          const o = e.StringFields[m];
-          o.Key = (await d(o.Key)).replace('KPH: ', '');
-          o.Value = await d(o.Value);
-        }
-        
-        console.log(`KeePassHttp Debug - StringFields после декодирования:`, e.StringFields);
+      for (const o of e.StringFields || []) {
+        await decryptProperty(o, 'Key');
+        await decryptProperty(o, 'Value');
+        o.Key = o.Key.replace('KPH: ', '');
       }
     }
     return r;
+  }
+  async customSearch(searchString) {
+    const r = await this.post({
+      'RequestType': 'get-logins-custom-search',
+      'TriggerUnlock': 'true',
+      'SearchString': searchString,
+      'SearchInTitles': true,
+      'SearchInUserNames': true,
+      'SearchInPasswords': false,
+      'SearchInUrls': true,
+      'SearchInNotes': false,
+      'SearchInOther': false,
+      'SearchInStringNames': false,
+      'SearchInTags': false,
+      'SearchInUuids': false,
+      'SearchInGroupPaths': false,
+      'SearchInGroupNames': false,
+      'SearchInHistory': false,
+      'SearchMode': 'Simple',
+      'ExcludeExpired': true,
+      'RespectEntrySearchingDisabled': true,
+      'ComparisonMode': 'InvariantCultureIgnoreCase'
+    }, undefined, true, ['SearchString']);
+    return this.decryptEntries(r);
+  }
+  async getByUuid(uuid) {
+    const r = await this.post({
+      'RequestType': 'get-login-by-uuid',
+      'TriggerUnlock': 'true',
+      'Uuid': uuid
+    }, undefined, true, ['Uuid']);
+    return this.decryptEntries(r);
   }
   set({url, submiturl, login, password}) {
     return this.post({
