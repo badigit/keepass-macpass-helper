@@ -1,6 +1,19 @@
 /* global engine, Safe, passkey */
 'use strict';
 
+const args = new URLSearchParams(location.search);
+let mode = 'popup';
+if (args.has('mode')) {
+  mode = args.get('mode');
+}
+else if (window.top !== window) {
+  mode = 'embedded';
+}
+if (args.has('title')) {
+  document.title = args.get('title');
+}
+document.body.dataset.mode = mode;
+
 const list = document.getElementById('list');
 const search = document.querySelector('input[type=search]');
 search.onkeydown = e => e.stopPropagation();
@@ -10,7 +23,8 @@ psbox.onkeydown = e => e.stopPropagation();
 // can I use allFames or chrome.scripting fails?
 let allFrames = true;
 
-let url;
+let port;
+let url = '';
 let tab = {};
 let usernames = [];
 
@@ -91,8 +105,6 @@ const decrypt = async sotp => {
   return safe.decrypt(sotp);
 };
 
-document.body.dataset.top = window.top === window;
-
 const storage = {
   get(name) {
     try {
@@ -112,32 +124,38 @@ const storage = {
 };
 const cookie = {
   get host() {
-    return (new URL(url)).hostname;
+    if (URL.canParse(url)) {
+      return (new URL(url)).hostname;
+    }
+    return '';
   },
   get: () => {
-    const value = storage.get('cookie:' + cookie.host);
+    const host = cookie.host;
+    if (host) {
+      const value = storage.get('cookie:' + cookie.host);
 
-    if (value) {
-      try {
-        const args = new URLSearchParams(value);
-        if (args.has('value')) {
-          return {
-            value: args.get('value'),
-            name: args.get('name')
-          };
+      if (value) {
+        try {
+          const args = new URLSearchParams(value);
+          if (args.has('value')) {
+            return {
+              value: args.get('value'),
+              name: args.get('name')
+            };
+          }
         }
-      }
-      catch (e) {}
+        catch (e) {}
 
-      // fallback
-      return {value};
-    }
-    // fallback for older version
-    const key = document.cookie.split(`${cookie.host}=`);
-    if (key.length > 1) {
-      return {
-        value: key[1].split(';')[0]
-      };
+        // fallback
+        return {value};
+      }
+      // fallback for older version
+      const key = document.cookie.split(`${cookie.host}=`);
+      if (key.length > 1) {
+        return {
+          value: key[1].split(';')[0]
+        };
+      }
     }
   },
   set: list => {
@@ -198,36 +216,50 @@ String Fields: ${(o.StringFields || []).length}`;
 
   list.focus();
 }
-function error(e) {
+function error(e, options = {
+  bold: true,
+  focus: true
+}) {
   document.getElementById('title').setAttribute('width', 0);
   document.getElementById('group').setAttribute('width', 0);
-  list.classList.add('error');
-
-  console.warn(`id: ` + chrome.runtime.id, e);
+  if (options.bold) {
+    list.classList.add('error');
+    console.warn(`id: ` + chrome.runtime.id, e);
+  }
 
   list.add([{
     name: e.message || e || 'Unknown Error',
     part: 'login'
   }], undefined, undefined, true);
-  const {option} = list.add([{
-    name: 'Use the options page to connect to KeePass, KeePassXC, or a local database',
-    part: 'login'
-  }]);
-  option.disabled = true;
-  list.focus();
+  if (options.bold) {
+    const {option} = list.add([{
+      name: 'Use the options page to connect to KeePass, KeePassXC, or a local database',
+      part: 'login'
+    }]);
+    option.disabled = true;
+  }
+  if (options.focus) {
+    list.focus();
+  }
 }
 
 async function submit() {
-  let query = search.value = search.value || url;
-  let url = query;
+  let query = search.value = search.value || url || '';
+
   if (query.includes('://')) {
+    url = url || query;
     // if query is a URL we just search for the URL
     query = undefined;
   }
   else {
     try {
       // try to construct and validate URL from user input
-      url = new URL('https://' + query).href;
+      const o = new URL('https://' + query);
+      url = o.href;
+      // if query is a URL we just search for the URL
+      if (o.hostname.includes('.')) {
+        query = undefined;
+      }
     }
     catch (e) {}
   }
@@ -242,6 +274,15 @@ async function submit() {
       url,
       query
     };
+    if (!query && !url) {
+      // throw Error('Enter a query...');
+      search.focus();
+      return error(new Error(args.get('instruction') || 'Entry a query to find matching credentials...'), {
+        bold: false,
+        focus: false
+      });
+    }
+
     const response = await engine.search(q);
 
     // hide group and title columns if no data available
@@ -249,7 +290,7 @@ async function submit() {
     document.getElementById('title').setAttribute('width', response.Entries.some(o => o.Name) ? '1fr' : '0');
     if (response.Entries.length === 0) {
       const {option} = list.add([{
-        name: 'No credential for this page!',
+        name: 'No credential for this query!',
         part: 'login'
       }], undefined, undefined, true);
       option.disabled = true;
@@ -261,6 +302,7 @@ async function submit() {
       // select an item
       const selected = {};
       const username = response.Entries.map(e => e.Login).filter(u => usernames.includes(u)).at(0);
+
       const cache = cookie.get();
       if (username) {
         // username is not the last selected one
@@ -360,6 +402,12 @@ document.addEventListener('search', submit);
       document.querySelector('#toolbar [data-cmd="insert-login"]').disabled = false;
       document.querySelector('#toolbar [data-cmd="copy"]').disabled = false;
     }
+    // There is no tab id (detached mode for instance)
+    if (!tab.id && !port) {
+      document.querySelector('#toolbar [data-cmd="insert-login"]').disabled = true;
+      document.querySelector('#toolbar [data-cmd="insert-password"]').disabled = true;
+      document.querySelector('#toolbar [data-cmd="insert-both"]').disabled = true;
+    }
 
     const o = e.target.selectedValues[0];
     // otp
@@ -402,6 +450,15 @@ insert.fields = async o => {
       console.warn(e);
       alert('Cannot replace {{TOTP}}; ' + (e.message || 'invalid password'));
     }
+  }
+
+  if (port) {
+    port.postMessage({
+      cmd: 'insert.fields',
+      type: 'stringFields',
+      value: stringFields
+    });
+    return Promise.resolve([{result: true}]);
   }
 
   return await chrome.scripting.executeScript({
@@ -457,150 +514,181 @@ insert.fields = async o => {
   });
 };
 
-insert.username = username => chrome.scripting.executeScript({
-  target: {
-    tabId: tab.id,
-    allFrames
-  },
-  func: username => {
-    const once = aElement => {
-      // insert username is requested; but password field is selected
-      if (aElement.type === 'password') {
+insert.username = username => {
+  if (port) {
+    port.postMessage({
+      cmd: 'insert.username',
+      type: 'username',
+      value: username
+    });
+    return Promise.resolve([{result: true}]);
+  }
+  return chrome.scripting.executeScript({
+    target: {
+      tabId: tab.id,
+      allFrames
+    },
+    func: username => {
+      const once = aElement => {
+        // insert username is requested; but password field is selected
+        if (aElement.type === 'password') {
+          const form = window.detectForm(aElement);
+          if (form) {
+            const e = [ // first use type=email
+              ...form.extendedQuerySelectorAll('input[type=email]'),
+              ...form.extendedQuerySelectorAll('input[type=text]')
+            ].filter(e => e.offsetParent).sort((a, b) => {
+              // try to find the best matched username field
+              const keys = ['user', 'usr', 'login'];
+
+              const av = keys.some(s => (a.name || '').includes(s) || (a.id || '').includes(s));
+              const bv = keys.some(s => (b.name || '').includes(s) || (b.id || '').includes(s));
+
+              if (av && bv === false) {
+                return -1;
+              }
+              if (av === false && bv) {
+                return 1;
+              }
+            }).shift();
+
+            if (e) {
+              aElement = e;
+              aElement.focus();
+            }
+          }
+        }
+
+        const r = document.execCommand('selectAll', false, '') &&
+          document.execCommand('insertText', false, username);
+        if (r === false) {
+          aElement.value = username;
+        }
+        aElement.dispatchEvent(new Event('change', {bubbles: true}));
+        aElement.dispatchEvent(new Event('input', {bubbles: true}));
+      };
+      const {aElement} = window;
+
+      if (aElement) {
+        [aElement].flat().forEach(e => {
+          e.focus();
+          once(e);
+        });
+
+        return true;
+      }
+    },
+    args: [username]
+  });
+};
+insert.password = password => {
+  if (port) {
+    port.postMessage({
+      cmd: 'insert.password',
+      type: 'password',
+      value: password
+    });
+    return Promise.resolve([{result: true}]);
+  }
+
+  return chrome.scripting.executeScript({
+    target: {
+      tabId: tab.id,
+      allFrames
+    },
+    func: password => {
+      const es = [];
+      const aElement = window.aElement;
+
+      if (!aElement) {
+        return;
+      }
+
+      // try to find the password field
+      for (const e of [[aElement]].flat()) {
+        if (e.type === 'password') {
+          es.push(e);
+        }
+      }
+      if (es.length === 0) {
         const form = window.detectForm(aElement);
         if (form) {
-          const e = [ // first use type=email
-            ...form.extendedQuerySelectorAll('input[type=email]'),
-            ...form.extendedQuerySelectorAll('input[type=text]')
-          ].filter(e => e.offsetParent).sort((a, b) => {
-            // try to find the best matched username field
-            const keys = ['user', 'usr', 'login'];
-
-            const av = keys.some(s => (a.name || '').includes(s) || (a.id || '').includes(s));
-            const bv = keys.some(s => (b.name || '').includes(s) || (b.id || '').includes(s));
-
-            if (av && bv === false) {
-              return -1;
+          for (const e of form.extendedQuerySelectorAll('[type=password]')) {
+            if (e.offsetParent) {
+              es.push(e);
             }
-            if (av === false && bv) {
-              return 1;
-            }
-          }).shift();
-
-          if (e) {
-            aElement = e;
-            aElement.focus();
           }
         }
       }
-
-      const r = document.execCommand('selectAll', false, '') &&
-        document.execCommand('insertText', false, username);
-      if (r === false) {
-        aElement.value = username;
-      }
-      aElement.dispatchEvent(new Event('change', {bubbles: true}));
-      aElement.dispatchEvent(new Event('input', {bubbles: true}));
-    };
-    const {aElement} = window;
-
-    if (aElement) {
-      [aElement].flat().forEach(e => {
+      let inserted = false;
+      for (const e of es) {
         e.focus();
-        once(e);
-      });
-
-      return true;
-    }
-  },
-  args: [username]
-});
-insert.password = password => chrome.scripting.executeScript({
-  target: {
-    tabId: tab.id,
-    allFrames
-  },
-  func: password => {
-    const es = [];
-    const aElement = window.aElement;
-
-    if (!aElement) {
-      return;
-    }
-
-    // try to find the password field
-    for (const e of [[aElement]].flat()) {
-      if (e.type === 'password') {
-        es.push(e);
+        let v = false;
+        // only insert if password element is focused
+        if (document.activeElement === e) {
+          document.execCommand('selectAll', false, '');
+          v = document.execCommand('insertText', false, password);
+        }
+        if (!v) {
+          try {
+            e.value = password;
+          }
+          catch (e) {}
+        }
+        e.dispatchEvent(new Event('change', {bubbles: true}));
+        e.dispatchEvent(new Event('input', {bubbles: true}));
+        inserted = true;
       }
-    }
-    if (es.length === 0) {
+      return inserted;
+    },
+    args: [password]
+  });
+};
+insert.submit = () => {
+  if (port) {
+    port.postMessage({
+      cmd: 'insert.submit',
+      type: 'submit'
+    });
+    return Promise.resolve();
+  }
+
+  return chrome.scripting.executeScript({
+    target: {
+      tabId: tab.id,
+      allFrames
+    },
+    func: () => {
+      const {aElement} = window;
+      if (!aElement) {
+        return false;
+      }
+
       const form = window.detectForm(aElement);
       if (form) {
-        for (const e of form.extendedQuerySelectorAll('[type=password]')) {
-          if (e.offsetParent) {
-            es.push(e);
-          }
+        const button =
+          form.querySelector('input[type=submit], button[type=submit]') ||
+          form.querySelector('input[name=submit], button[name=submit]') ||
+          form.querySelector('input[name=Submit], button[name=Submit]') ||
+          form.querySelector('button:not([type=reset i]):not([type=button i])');
+
+        if (button) {
+          button.click();
+        }
+        else {
+          // try to submit with Enter key on the password element
+          const enter = name => new KeyboardEvent(name, {
+            keyCode: 13,
+            bubbles: true
+          });
+          aElement.dispatchEvent(enter('keypress'));
+          aElement.dispatchEvent(enter('keydown'));
+          aElement.dispatchEvent(enter('keyup'));
         }
       }
     }
-    let inserted = false;
-    for (const e of es) {
-      e.focus();
-      let v = false;
-      // only insert if password element is focused
-      if (document.activeElement === e) {
-        document.execCommand('selectAll', false, '');
-        v = document.execCommand('insertText', false, password);
-      }
-      if (!v) {
-        try {
-          e.value = password;
-        }
-        catch (e) {}
-      }
-      e.dispatchEvent(new Event('change', {bubbles: true}));
-      e.dispatchEvent(new Event('input', {bubbles: true}));
-      inserted = true;
-    }
-    return inserted;
-  },
-  args: [password]
-});
-insert.submit = () => chrome.scripting.executeScript({
-  target: {
-    tabId: tab.id,
-    allFrames
-  },
-  func: () => {
-    const {aElement} = window;
-    if (!aElement) {
-      return false;
-    }
-
-    const form = window.detectForm(aElement);
-    if (form) {
-      const button =
-        form.querySelector('input[type=submit], button[type=submit]') ||
-        form.querySelector('input[name=submit], button[name=submit]') ||
-        form.querySelector('input[name=Submit], button[name=Submit]') ||
-        form.querySelector('button:not([type=reset i]):not([type=button i])');
-
-      if (button) {
-        button.click();
-      }
-      else {
-        // try to submit with Enter key on the password element
-        const enter = name => new KeyboardEvent(name, {
-          keyCode: 13,
-          bubbles: true
-        });
-        aElement.dispatchEvent(enter('keypress'));
-        aElement.dispatchEvent(enter('keydown'));
-        aElement.dispatchEvent(enter('keyup'));
-      }
-    }
-  }
-});
+  });
+};
 
 const copy = content => navigator.clipboard.writeText(content).catch(e => {
   console.info('[clipboard]', e);
@@ -944,49 +1032,60 @@ const access = () => new Promise(resolve => chrome.storage.local.get({
       });
     }
     // select tab
-    const tabs = await new Promise(resolve => chrome.tabs.query({
-      currentWindow: true,
-      active: true
-    }, resolve));
-    if (tabs.length < 1) {
-      throw Error('Cannot detect active tab');
+    if (mode === 'detached') {
+      tab = {
+        url: args.get('href'),
+        id: args.get('tabid')
+      };
     }
-    tab = tabs[0];
+    else {
+      const tabs = await new Promise(resolve => chrome.tabs.query({
+        currentWindow: true,
+        active: true
+      }, resolve));
+      if (tabs.length < 1) {
+        throw Error('Cannot detect active tab');
+      }
+      tab = tabs[0];
+    }
     search.value = url = tab.url;
 
     let aElement = false;
-    try {
-      // sometimes "chrome.scripting.executeScript" does not resolve when there are cross-origin frames
-      let r = await Promise.race([
-        chrome.scripting.executeScript({
-          target: {
-            tabId: tab.id,
-            allFrames: true
-          },
-          files: ['/data/helper.js', '/data/cmd/inject.js'],
-          injectImmediately: true
-        }),
-        new Promise(resolve => setTimeout(() => resolve(false), 2000))
-      ]);
-      if (r === false) {
-        allFrames = false;
-        r = await chrome.scripting.executeScript({
-          target: {
-            tabId: tab.id,
-            allFrames: false
-          },
-          files: ['/data/helper.js', '/data/cmd/inject.js'],
-          injectImmediately: true
-        });
-      }
+    // on detached mode do not search for active element
+    if (tab.id) {
+      try {
+        // sometimes "chrome.scripting.executeScript" does not resolve when there are cross-origin frames
+        let r = await Promise.race([
+          chrome.scripting.executeScript({
+            target: {
+              tabId: tab.id,
+              allFrames: true
+            },
+            files: ['/data/helper.js', '/data/cmd/inject.js'],
+            injectImmediately: true
+          }),
+          new Promise(resolve => setTimeout(() => resolve(false), 2000))
+        ]);
+        if (r === false) {
+          allFrames = false;
+          r = await chrome.scripting.executeScript({
+            target: {
+              tabId: tab.id,
+              allFrames: false
+            },
+            files: ['/data/helper.js', '/data/cmd/inject.js'],
+            injectImmediately: true
+          });
+        }
 
-      usernames = r.filter(a => a).map(r => r.result?.usernames).flat().filter((s, i, l) => s && l.indexOf(s) === i);
-      aElement = r.filter(a => a).map(r => r.result?.aElement).flat().some(a => a);
-    }
-    catch (e) {
-      console.warn(e);
-      if (!tab.url || tab.url.startsWith('http') === false) {
-        throw Error(e);
+        usernames = r.filter(a => a).map(r => r.result?.usernames).flat().filter((s, i, l) => s && l.indexOf(s) === i);
+        aElement = r.filter(a => a).map(r => r.result?.aElement).flat().some(a => a);
+      }
+      catch (e) {
+        console.warn(e);
+        if (!tab.url || tab.url.startsWith('http') === false) {
+          throw Error(e);
+        }
       }
     }
 
@@ -1016,7 +1115,7 @@ list.addEventListener('dblclick', () => {
 });
 
 // on embedded
-if (window.top !== window) {
+if (mode === 'embedded') {
   const close = () => chrome.runtime.sendMessage({
     cmd: 'close-me'
   });
@@ -1051,3 +1150,10 @@ document.querySelector('#toast input').onclick = () => chrome.permissions.reques
     window.close();
   }
 });
+
+// do we have a port to send data
+if (mode === 'detached') {
+  port = chrome.runtime.connect({
+    name: 'cmd'
+  });
+}

@@ -177,6 +177,50 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
     return true;
   }
 });
+// External Access
+chrome.runtime.onConnectExternal.addListener(eport => {
+  eport.onMessage.addListener(async request => {
+    if (request.cmd === 'ask-for-credential') {
+      const args = new URLSearchParams();
+      args.set('mode', 'detached');
+      if (request.href) {
+        args.set('href', request.href);
+      }
+      if (request.tabid) {
+        args.set('tabid', request.tabid);
+      }
+      if (request.instruction) {
+        args.set('instruction', request.instruction);
+      }
+      if (eport.sender.id) {
+        args.set('title', 'Credential request by "' + eport.sender.id + '" :: KeePassHelper');
+      }
+
+      // listen for port connection for 5 seconds
+      const observe = iport => {
+        chrome.runtime.onConnect.removeListener(observe);
+        iport.onDisconnect.addListener(() => {
+          eport.disconnect();
+        });
+        iport.onMessage.addListener(request => eport.postMessage(request));
+      };
+      chrome.runtime.onConnect.addListener(observe);
+
+      const win = await chrome.windows.create({
+        url: '/data/cmd/index.html?' + args.toString(),
+        width: 600,
+        height: 800,
+        type: 'popup'
+      });
+      eport.onDisconnect.addListener(() => {
+        chrome.windows.remove(win.id).catch(() => {});
+      });
+      setTimeout(() => {
+        chrome.runtime.onConnect.removeListener(observe);
+      }, 5000);
+    }
+  });
+});
 
 // Context Menu
 {

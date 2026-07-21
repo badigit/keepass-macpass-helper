@@ -22,7 +22,7 @@ body {
   font-size: 13px;
   font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
 }
-body[data-top=true] {
+body[data-mode="popup"] {
   margin: var(--gap);
   width: 550px;
   height: 400px;
