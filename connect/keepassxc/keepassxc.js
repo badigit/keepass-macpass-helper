@@ -120,30 +120,36 @@ class KeePassXC extends SimpleStorage {
   }
   // public methods
   async 'test-associate'() {
-    const resp = await this.databasehash();
-    if (!resp.hash) {
+    if (this.connected) {
+      return;
+    }
+    const database = await this.databasehash();
+    if (!database.hash) {
       throw Error('Requesting database info from KeePassXC failed');
     }
-    this.db = resp;
+    this.db = database;
 
-    const prefs = await this.read({
-      ['xc-' + this.db.hash]: {}
-    });
-    if (prefs['xc-' + this.db.hash]) {
-      this.key = prefs['xc-' + this.db.hash];
-      const resp = await this.securePost(Object.assign({
-        'action': 'test-associate'
-      }, this.key));
-      if (resp && resp.success === 'true') {
-        return;
-      }
-      else {
-        throw Error('cannot associate/2');
-      }
-    }
-    else {
+    const prefs = await this.read(null);
+    const currentKey = prefs['xc-' + this.db.hash];
+    if (!currentKey?.id) {
       throw Error('cannot associate/1');
     }
+
+    const response = await this.securePost(Object.assign({
+      'action': 'test-associate'
+    }, currentKey));
+    if (!response || response.success !== 'true') {
+      throw Error('cannot associate/2');
+    }
+
+    this.key = currentKey;
+    this.keys = Object.keys(prefs)
+      .filter(name => name.startsWith('xc-') && prefs[name]?.id)
+      .map(name => prefs[name]);
+    if (!this.keys.length) {
+      throw Error('cannot associate/3');
+    }
+    this.connected = true;
   }
   async associate() {
     const idKey = this.btoa(nacl.box.keyPair().publicKey);
@@ -163,6 +169,8 @@ class KeePassXC extends SimpleStorage {
       await this.write({
         ['xc-' + resp.hash]: this.key
       });
+      this.keys = [this.key];
+      this.connected = true;
       return;
     }
     else {
@@ -177,7 +185,7 @@ class KeePassXC extends SimpleStorage {
   'get-logins'(url) {
     return this.securePost({
       'action': 'get-logins',
-      'keys': [this.key],
+      'keys': this.keys?.length ? this.keys : [this.key],
       url
     }).then(resp => {
       if (resp.errorCode === '15') { // no match
