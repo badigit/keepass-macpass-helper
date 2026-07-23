@@ -2,8 +2,12 @@
  *
  * Field-detection heuristics live in data/hints/heuristics.js (loaded before
  * this file via manifest content_scripts) and are exposed as self.__kpHints. */
-if (!self.__kpHintsInjected) {
-  self.__kpHintsInjected = true;
+{
+  const injectedVersion = chrome.runtime.getManifest().version;
+  const dependenciesReady = self.__kpHints && self.__kpFormContext &&
+    self.__kpIgnoredFields && self.__kpHintsLayout;
+  if (dependenciesReady && self.__kpHintsInjected !== injectedVersion) {
+  self.__kpHintsInjected = injectedVersion;
 
   const {isOTPField, isPasswordField, isLoginField} = self.__kpHints;
   const {
@@ -68,7 +72,11 @@ if (!self.__kpHintsInjected) {
   /* ---- Shadow DOM setup ---- */
   const createHost = () => {
     if (host) return;
+    // Extension updates do not reload an already open page. Remove a host left
+    // behind by the previous content-script context before mounting this one.
+    document.querySelectorAll('kp-hints-host').forEach(element => element.remove());
     host = document.createElement('kp-hints-host');
+    host.dataset.extensionVersion = injectedVersion;
     host.style.cssText = 'position:absolute;z-index:2147483647;pointer-events:none;';
     shadow = host.attachShadow({mode: 'closed'});
 
@@ -626,4 +634,5 @@ if (!self.__kpHintsInjected) {
       sendResponse(true);
     }
   });
+  }
 }

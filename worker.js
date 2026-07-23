@@ -491,35 +491,36 @@ chrome.tabs.onRemoved.addListener(tabId => {
   chrome.storage.session.remove('kp-save-form:' + tabId).catch(() => {});
 });
 
-// Register hints content script
+// The manifest is the single source of truth for normal hint injection.
+// Declarative content scripts are not added to pages that were already open
+// while the extension was updated, so refresh those pages once on update.
 {
-  const registerHints = async () => {
-    try {
-      try {
-        await chrome.scripting.unregisterContentScripts({ids: ['kp-hints']});
-      }
-      catch (e) {}
-      await chrome.scripting.registerContentScripts([{
-        id: 'kp-hints',
-        matches: ['<all_urls>'],
-        js: [
-          '/data/hints/heuristics.js',
-          '/data/hints/form-context.js',
-          '/data/hints/ignored-fields.js',
-          '/data/hints/layout.js',
-          '/data/hints/inject.js'
-        ],
-        runAt: 'document_idle',
-        allFrames: true
-      }]);
-    }
-    catch (e) {
-      console.warn('hints registration:', e);
-    }
-  };
-  chrome.runtime.onInstalled.addListener(registerHints);
-  chrome.runtime.onStartup.addListener(registerHints);
-  registerHints();
+  const hintScripts = [
+    '/data/hints/heuristics.js',
+    '/data/hints/form-context.js',
+    '/data/hints/ignored-fields.js',
+    '/data/hints/layout.js',
+    '/data/hints/inject.js'
+  ];
+  const removeLegacyHintRegistration = () => chrome.scripting.unregisterContentScripts({
+    ids: ['kp-hints']
+  }).catch(() => {});
+
+  // Older releases registered the same scripts dynamically as well as in the
+  // manifest. The registration persists, so clean it up on the first worker
+  // start even when an unpacked extension was reloaded manually.
+  removeLegacyHintRegistration();
+  chrome.runtime.onInstalled.addListener(async ({reason}) => {
+    if (reason !== 'update') return;
+    await removeLegacyHintRegistration();
+    const tabs = await chrome.tabs.query({});
+    await Promise.allSettled(tabs
+      .filter(tab => tab.id && isScriptableUrl(tab.url))
+      .map(tab => chrome.scripting.executeScript({
+        target: {tabId: tab.id, allFrames: true},
+        files: hintScripts
+      })));
+  });
 }
 
 const onCommand = async (info, tab) => {
