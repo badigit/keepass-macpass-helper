@@ -17,6 +17,7 @@ if (!self.__kpHintsInjected) {
     MAX_IGNORED_FIELDS,
     ignoredFieldKey
   } = self.__kpIgnoredFields;
+  const {dropdownLayout} = self.__kpHintsLayout;
 
   const CACHE_TTL = 30000;
 
@@ -75,6 +76,7 @@ if (!self.__kpHintsInjected) {
     style.textContent = `
       :host { all: initial; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
       .kp-dropdown {
+        box-sizing: border-box;
         position: fixed;
         background: #333;
         color: #e3e2e2;
@@ -90,14 +92,25 @@ if (!self.__kpHintsInjected) {
       .kp-dropdown.open { display: block; }
       .kp-row {
         display: grid;
-        grid-template-columns: 2fr 1fr 1fr;
         gap: 8px;
-        padding: 0 10px;
+        padding: 0 8px;
         height: 28px;
         align-items: center;
         cursor: default;
         white-space: nowrap;
         overflow: hidden;
+      }
+      .kp-dropdown[data-columns="login"] .kp-row {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .kp-dropdown[data-columns="login-name"] .kp-row {
+        grid-template-columns: minmax(72px, 2fr) minmax(0, 3fr);
+      }
+      .kp-dropdown[data-columns="login-group"] .kp-row {
+        grid-template-columns: minmax(72px, 3fr) minmax(0, 2fr);
+      }
+      .kp-dropdown[data-columns="login-name-group"] .kp-row {
+        grid-template-columns: minmax(72px, 1.2fr) minmax(0, 2fr) minmax(0, 1fr);
       }
       .kp-row > span { overflow: hidden; text-overflow: ellipsis; }
       .kp-row:hover, .kp-row.active { background: #4875bf; color: #fff; }
@@ -195,9 +208,17 @@ if (!self.__kpHintsInjected) {
   const position = () => {
     if (!activeField || !list) return;
     const r = activeField.getBoundingClientRect();
-    list.style.left = r.left + 'px';
+    const viewportPadding = 8;
+    const minWidth = Number(list.dataset.minWidth) || 280;
+    const availableWidth = Math.max(0, window.innerWidth - viewportPadding * 2);
+    const width = Math.min(Math.max(r.width, minWidth), availableWidth);
+    const left = Math.min(
+      Math.max(r.left, viewportPadding),
+      Math.max(viewportPadding, window.innerWidth - width - viewportPadding)
+    );
+    list.style.left = left + 'px';
     list.style.top = (r.bottom + 2) + 'px';
-    list.style.width = Math.max(r.width, 280) + 'px';
+    list.style.width = width + 'px';
   };
 
   /* ---- Render entries ---- */
@@ -207,6 +228,9 @@ if (!self.__kpHintsInjected) {
     list.innerHTML = '';
     selectedIdx = -1;
     visibleEntries = items.slice();
+    const layout = dropdownLayout(items);
+    list.dataset.columns = layout.key;
+    list.dataset.minWidth = layout.minWidth;
 
     if (!items.length || manualQuery) {
       const searchWrap = document.createElement('div');
@@ -267,17 +291,12 @@ if (!self.__kpHintsInjected) {
       row.className = 'kp-row';
       row.dataset.index = e.originalIndex;
 
-      const s1 = document.createElement('span');
-      s1.textContent = e.Login;
-      s1.title = e.Login;
-      const s2 = document.createElement('span');
-      s2.textContent = e.Name;
-      s2.title = e.Name;
-      const s3 = document.createElement('span');
-      s3.textContent = e.group;
-      s3.title = e.group;
-
-      row.append(s1, s2, s3);
+      for (const field of layout.fields) {
+        const cell = document.createElement('span');
+        cell.textContent = e[field] || '';
+        cell.title = e[field] || '';
+        row.appendChild(cell);
+      }
       list.appendChild(row);
 
       // mousedown fires before focusout — prevents dropdown from closing

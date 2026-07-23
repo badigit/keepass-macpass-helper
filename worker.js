@@ -504,6 +504,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
           '/data/hints/heuristics.js',
           '/data/hints/form-context.js',
           '/data/hints/ignored-fields.js',
+          '/data/hints/layout.js',
           '/data/hints/inject.js'
         ],
         runAt: 'document_idle',
