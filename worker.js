@@ -10,6 +10,7 @@ self.kdbxweb = {};
 importScripts(
   '/tools/tld.js',
   '/tools/url-lookup.js',
+  '/tools/scriptable-url.js',
   '/connect/SecureSyncedDB.js',
   '/connect/api.js',
   '/connect/keepass/keepass.js',
@@ -26,6 +27,7 @@ importScripts(
 );
 
 const {searchWithUrlFallback, isLookupCandidate} = self.__kpUrlLookup;
+const {isScriptableUrl} = self.__kpScriptableUrl;
 
 const current = () => chrome.tabs.query({
   lastFocusedWindow: true,
@@ -520,17 +522,11 @@ chrome.tabs.onRemoved.addListener(tabId => {
   registerHints();
 }
 
-// Pages we cannot script into: chrome://, edge://, the Chrome Web Store,
-// view-source:, about:blank, and similar. Bail out with a friendly badge
-// instead of letting chrome.scripting throw "Cannot access a chrome:// URL".
-const RESTRICTED_URL_RE = /^(chrome|edge|about|view-source|chrome-extension|moz-extension|chrome-search|chrome-devtools|devtools):|^https?:\/\/chromewebstore\.google\.com/i;
-const isScriptable = url => !!url && !RESTRICTED_URL_RE.test(url);
-
 const onCommand = async (info, tab) => {
   tab = tab || await current();
 
   if (info.menuItemId === 'save-form') {
-    if (!isScriptable(tab.url)) {
+    if (!isScriptableUrl(tab.url)) {
       notify(tab, 'Not available on this page', '–', '#888');
       return;
     }
@@ -601,7 +597,7 @@ const onCommand = async (info, tab) => {
     });
   }
   else if (info.menuItemId === 'encrypt-data') {
-    if (!isScriptable(tab.url)) {
+    if (!isScriptableUrl(tab.url)) {
       notify(tab, 'Not available on this page', '–', '#888');
       return;
     }

@@ -2,6 +2,7 @@
 'use strict';
 
 const {searchWithUrlFallback} = self.__kpUrlLookup;
+const {isScriptableUrl} = self.__kpScriptableUrl;
 
 const list = document.getElementById('list');
 const search = document.querySelector('input[type=search]');
@@ -13,6 +14,7 @@ let allFrames = true;
 let url;
 let tab = {};
 let usernames = [];
+let scriptableTab = true;
 
 const errorMessage = e => {
   if (typeof e === 'string') {
@@ -21,15 +23,7 @@ const errorMessage = e => {
   return e?.message || String(e || '');
 };
 const isFrameErrorPage = e => /Frame with ID \d+ is showing error page/i.test(errorMessage(e));
-const isRestrictedTabUrl = value => {
-  try {
-    const protocol = new URL(value).protocol;
-    return ['chrome:', 'edge:', 'about:', 'chrome-extension:', 'moz-extension:', 'devtools:'].includes(protocol);
-  }
-  catch (e) {
-    return false;
-  }
-};
+const isRestrictedTabUrl = value => !isScriptableUrl(value);
 const isUrlAccessError = e => /Cannot access (a|contents of) .* URL/i.test(errorMessage(e));
 const safeExecuteScript = async options => {
   try {
@@ -196,6 +190,13 @@ function error(e) {
   list.focus();
 }
 
+const showPageNotice = message => {
+  const toast = document.getElementById('toast');
+  toast.querySelector('input').style.visibility = 'hidden';
+  toast.querySelector('span').textContent = message;
+  toast.classList.remove('hidden');
+};
+
 async function submit() {
   let query = search.value = search.value || url;
   if (query.indexOf('://') === -1) {
@@ -324,7 +325,10 @@ document.addEventListener('search', submit);
       !target.selectedValues[0][0].password;
 
     [...document.getElementById('toolbar').querySelectorAll('input, button')]
-      .forEach(input => input.disabled = disabled);
+      .forEach(input => {
+        const requiresPageAccess = (input.dataset.cmd || '').startsWith('insert-');
+        input.disabled = disabled || (!scriptableTab && requiresPageAccess);
+      });
 
     const o = e.target.selectedValues[0];
     // otp
@@ -553,6 +557,13 @@ document.addEventListener('click', async e => {
     }
     //
     if (cmd && cmd.startsWith('insert-')) {
+      if (!scriptableTab) {
+        chrome.runtime.sendMessage({
+          cmd: 'notify',
+          message: 'Browser pages cannot be filled. Use Copy instead.'
+        });
+        return;
+      }
       safeExecuteScript.frameError = false;
       const checked = list.selectedValues[0][0];
 
@@ -765,9 +776,13 @@ const access = () => new Promise(resolve => chrome.storage.local.get({
     tab = tabs[0];
     // `pendingUrl` is useful when a tab is in auth challenge/error state.
     search.value = url = tab.pendingUrl || tab.url;
+    scriptableTab = isScriptableUrl(url);
 
     let aElement = false;
-    try {
+    if (!scriptableTab) {
+      showPageNotice('Browser pages cannot be filled. Open a website, or search and use Copy.');
+    }
+    else try {
       // sometimes "chrome.scripting.executeScript" does not resolve when there are cross-origin frames
       let r = await Promise.race([
         chrome.scripting.executeScript({
@@ -796,19 +811,21 @@ const access = () => new Promise(resolve => chrome.storage.local.get({
       aElement = r.filter(a => a).map(r => r.result?.aElement).flat().some(a => a);
     }
     catch (e) {
-      console.warn(e);
       const expected =
         isFrameErrorPage(e) ||
         isRestrictedTabUrl(url) ||
         isUrlAccessError(e);
 
+      if (!expected) {
+        console.warn(e);
+      }
       if (expected === false && (!url || url.startsWith('http') === false)) {
         throw Error(errorMessage(e));
       }
     }
 
     // in case there is no active element show the toast
-    if (aElement === false) {
+    if (aElement === false && scriptableTab) {
       chrome.permissions.contains({
         origins: ['<all_urls>']
       }).then(granted => {
