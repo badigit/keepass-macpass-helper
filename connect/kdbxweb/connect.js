@@ -92,11 +92,20 @@ class KWPASS {
     });
   }
   async set(query) {
-    const {url, submiturl, login, password} = query;
+    const {url, submiturl, login, password, title, notes} = query;
     try {
       const group = this.db.getDefaultGroup();
       const entry = this.db.createEntry(group);
       entry.pushHistory();
+      entry.fields.Title = title || (() => {
+        try {
+          return new URL(url || submiturl).host;
+        }
+        catch (e) {
+          return url || submiturl || '';
+        }
+      })();
+      if (notes) entry.fields.Notes = notes;
       entry.fields.UserName = login;
       entry.fields.URL = url || submiturl;
       entry.fields.Password = kdbxweb.ProtectedValue.fromString(password || '');

@@ -240,14 +240,20 @@ class KeePass extends SimpleStorage {
     }, undefined, true, ['Uuid']);
     return this.decryptEntries(r);
   }
-  set({url, submiturl, login, password}) {
+  set({url, submiturl, login, password, title, notes, group}) {
+    // Name is stock KeePassHTTP (entry title). Notes and Group are extensions
+    // of the badigit/keepasshttp fork; the stock plugin deserializes with
+    // opt-in members and silently ignores them.
     return this.post({
       'RequestType': 'set-login',
       'Login': login,
       'Password': password,
       'Url': url,
-      'SubmitUrl': submiturl
-    }, undefined, true, ['Login', 'Password', 'Url', 'SubmitUrl']);
+      'SubmitUrl': submiturl,
+      'Name': title,
+      'Notes': notes,
+      'Group': group
+    }, undefined, true, ['Login', 'Password', 'Url', 'SubmitUrl', 'Name', 'Notes', 'Group']);
   }
   // high-level access
   async search(query) {

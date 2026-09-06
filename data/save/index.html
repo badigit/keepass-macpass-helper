@@ -3,69 +3,105 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="save_page_title">Save login</title>
   <link rel="stylesheet" type="text/css" href="index.css">
 </head>
 <body>
-  <form action="#" autocomplete="off">
-    <label>URL
-      <div class="row">
-        <input type="text" name="url">
-        <button type="button" data-cmd="trim" title="Strip path, keep origin">Clean</button>
-        <button type="button" data-cmd="domain" title="Reduce to bare domain">Domain</button>
+  <form action="#" autocomplete="off" novalidate>
+    <header class="head">
+      <img id="favicon" alt="" hidden>
+      <div class="head-text">
+        <input type="text" name="title" class="title" data-i18n-title="save_field_title_placeholder" spellcheck="false">
       </div>
-    </label>
+    </header>
 
-    <label>Submit URL
-      <div class="row">
-        <input type="text" name="submiturl">
-        <button type="button" data-cmd="trim">Clean</button>
-        <button type="button" data-cmd="domain">Domain</button>
+    <div class="field">
+      <div class="field-head">
+        <label for="f-url" data-i18n="save_field_url">URL</label>
+        <div class="segmented" role="radiogroup">
+          <button type="button" data-cmd="url-mode" data-mode="full" class="active" data-i18n="save_url_full" data-i18n-title="save_url_full_hint">Full</button>
+          <button type="button" data-cmd="url-mode" data-mode="origin" data-i18n="save_url_origin" data-i18n-title="save_url_origin_hint">Site</button>
+          <button type="button" data-cmd="url-mode" data-mode="domain" data-i18n="save_url_domain" data-i18n-title="save_url_domain_hint">Domain</button>
+        </div>
       </div>
-    </label>
+      <input id="f-url" type="text" name="url" spellcheck="false">
+    </div>
 
-    <label>Login
-      <input type="text" name="login" autocomplete="new-password" required>
-    </label>
+    <div class="field">
+      <label for="f-login" data-i18n="save_field_login">Login</label>
+      <input id="f-login" type="text" name="login" autocomplete="off" spellcheck="false" required>
+    </div>
 
-    <label>Password
+    <div class="field">
+      <label for="f-password" data-i18n="save_field_password">Password</label>
       <div class="row">
-        <input type="password" name="password" autocomplete="new-password" required>
-        <button type="button" data-cmd="toggle" data-type="password" title="Show / hide">👁</button>
-        <button type="button" data-cmd="generate" title="Generate a password">⚙</button>
+        <input id="f-password" type="password" name="password" autocomplete="new-password" required>
+        <button type="button" class="icon" data-cmd="toggle" data-type="password" data-i18n-title="save_password_toggle" title="Show / hide">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 5c-5 0-9 4-10.5 7C3 15 7 19 12 19s9-4 10.5-7C21 8 17 5 12 5zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>
+        </button>
+        <button type="button" class="icon" data-cmd="copy" data-i18n-title="save_password_copy" title="Copy password">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
+        </button>
       </div>
-    </label>
-
-    <div id="gen-panel" hidden>
       <div class="row gen-row">
-        <select name="gen-mode">
-          <option value="charset">Charset</option>
-          <option value="diceware" selected>Diceware</option>
-        </select>
-        <button type="button" data-cmd="gen-go" class="primary">Generate</button>
-        <button type="button" data-cmd="gen-close" title="Close panel">✕</button>
+        <button type="button" data-cmd="gen-go" class="small" data-i18n="save_gen_go">Generate</button>
+        <div class="segmented">
+          <button type="button" data-cmd="gen-mode" data-mode="diceware" data-i18n="save_gen_mode_diceware">Words</button>
+          <button type="button" data-cmd="gen-mode" data-mode="charset" data-i18n="save_gen_mode_charset">Characters</button>
+        </div>
+        <span class="spacer"></span>
+        <button type="button" class="icon small" data-cmd="generate" data-i18n-title="save_gen_settings" title="Generator settings" aria-expanded="false" aria-controls="gen-panel">
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 .1-1 7.6 7.6 0 0 0-.1-1l2.1-1.6a.5.5 0 0 0 .1-.6l-2-3.5a.5.5 0 0 0-.6-.2l-2.5 1a7.3 7.3 0 0 0-1.7-1l-.4-2.6a.5.5 0 0 0-.5-.4h-4a.5.5 0 0 0-.5.4l-.4 2.6a7.3 7.3 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.2l-2 3.5a.5.5 0 0 0 .1.6L4.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6a.5.5 0 0 0-.1.6l2 3.5c.1.2.4.3.6.2l2.5-1a7.3 7.3 0 0 0 1.7 1l.4 2.6c0 .2.2.4.5.4h4c.2 0 .4-.2.5-.4l.4-2.6a7.3 7.3 0 0 0 1.7-1l2.5 1c.2.1.5 0 .6-.2l2-3.5a.5.5 0 0 0-.1-.6L19.4 13zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+        </button>
       </div>
+    </div>
+
+    <section id="gen-panel" class="panel" hidden>
       <div class="gen-fields" data-mode="diceware">
-        <label>Words <input type="number" name="dw-count" min="3" max="12" value="5"></label>
-        <label>Separator <input type="text" name="dw-sep" value="-" maxlength="3"></label>
-        <label class="check"><input type="checkbox" name="dw-cap" checked> Capitalize</label>
-        <label>Digits <input type="number" name="dw-digits" min="0" max="6" value="1"></label>
-        <label>Symbols <input type="number" name="dw-symbols" min="0" max="6" value="1"></label>
+        <label><span data-i18n="save_gen_words">Words</span><input type="number" name="dw-count" min="3" max="12" value="5"></label>
+        <label><span data-i18n="save_gen_separator">Separator</span><input type="text" name="dw-sep" value="-" maxlength="3"></label>
+        <label><span data-i18n="save_gen_digits">Digits</span><input type="number" name="dw-digits" min="0" max="6" value="1"></label>
+        <label><span data-i18n="save_gen_symbols">Symbols</span><input type="number" name="dw-symbols" min="0" max="6" value="1"></label>
+        <label class="check"><input type="checkbox" name="dw-cap" checked><span data-i18n="save_gen_capitalize">Capitalize</span></label>
       </div>
       <div class="gen-fields" data-mode="charset" hidden>
-        <label>Letters/digits <input type="number" name="cs-len1" min="0" max="64" value="14"></label>
-        <label>Symbols <input type="number" name="cs-len2" min="0" max="16" value="3"></label>
+        <label><span data-i18n="save_gen_letters">Letters / digits</span><input type="number" name="cs-len1" min="0" max="64" value="14"></label>
+        <label><span data-i18n="save_gen_symbols">Symbols</span><input type="number" name="cs-len2" min="0" max="16" value="3"></label>
       </div>
+    </section>
+
+    <div class="field">
+      <label for="f-notes" data-i18n="save_field_notes">Notes</label>
+      <textarea id="f-notes" name="notes" rows="2"></textarea>
     </div>
 
-    <div class="actions">
-      <button type="button" data-cmd="cancel">Close</button>
-      <button type="button" data-cmd="reset">Reset</button>
+    <details id="more" class="more">
+      <summary data-i18n="save_more">More</summary>
+      <div class="field">
+        <label for="f-group" data-i18n="save_field_group" data-i18n-title="save_field_group_hint">Group</label>
+        <input id="f-group" type="text" name="group" data-i18n-placeholder="save_field_group_placeholder" placeholder="KeePassHttp Passwords" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="f-submiturl" data-i18n="save_field_submiturl" data-i18n-title="save_field_submiturl_hint">Submit URL</label>
+        <input id="f-submiturl" type="text" name="submiturl" spellcheck="false">
+      </div>
+    </details>
+
+    <div id="status" class="status" hidden></div>
+
+    <footer class="actions">
+      <button type="button" data-cmd="cancel" data-i18n="save_button_cancel">Cancel</button>
       <span class="spacer"></span>
-      <span class="save-in">Save in</span>
-      <button type="submit" data-cmd="ssdb" title="Encrypted Chrome sync storage (AES-256). Independent of any KeePass database.">SSDB</button>
-      <button type="submit" data-cmd="keepass" class="primary" title="Save in the connected KeePass/KeePassXC database">KeePass</button>
-    </div>
+      <label class="target" data-i18n-title="save_target_label">
+        <select name="target">
+          <option value="keepass" data-i18n="save_target_keepass">KeePass</option>
+          <option value="ssdb" data-i18n="save_target_ssdb">Synced storage</option>
+        </select>
+      </label>
+      <button type="submit" class="primary" data-cmd="save" data-i18n="save_button_save">Save</button>
+    </footer>
   </form>
+  <script src="/tools/i18n.js"></script>
   <script src="session.js"></script>
   <script src="/tools/safe.js"></script>
   <script src="/connect/SecureSyncedDB.js"></script>

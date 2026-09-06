@@ -552,7 +552,7 @@ const onCommand = async (info, tab) => {
 
     // Seed an empty payload so the side panel doesn't render with the URL of
     // an earlier tab if storage happens to be stale.
-    chrome.storage.session.set({[sessionKey]: {pairs: [], url: tab.url}}).catch(() => {});
+    chrome.storage.session.set({[sessionKey]: {pairs: [], url: tab.url, favicon: tab.favIconUrl}}).catch(() => {});
 
     try {
       await chrome.scripting.executeScript({
@@ -582,7 +582,7 @@ const onCommand = async (info, tab) => {
       const pairs = r.map(o => o.result).flat().filter(a => a);
 
       // Push final payload; storage.onChanged in the panel re-renders.
-      await chrome.storage.session.set({[sessionKey]: {pairs, url: tab.url}});
+      await chrome.storage.session.set({[sessionKey]: {pairs, url: tab.url, favicon: tab.favIconUrl}});
     }
     catch (e) {
       console.warn(e);

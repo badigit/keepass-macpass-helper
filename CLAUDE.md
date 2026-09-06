@@ -46,13 +46,13 @@ loading.
 - `hints/inject.js` — Content script injected on all pages; creates a closed Shadow DOM autocomplete dropdown on input focus. Uses field detection heuristics (`isLoginField()`, `isOTPField()`, `isClearlyNonAuthField()`)
 - `helper.js` — DOM utilities injected into pages: `extendedQuerySelectorAll()` (traverses shadow roots), `detectForm()` (intelligent form container detection), and `setInputValue()` (robust input setter for React/Vue controlled inputs)
 - `options/` — Extension options page
-- `save/` — Save new login form UI
+- `save/` — Save new login form UI (side panel). Sends `title`/`notes`/`group` alongside login/password; stock KeePassHTTP uses `Name` only, `Notes`/`Group` need the badigit/keepasshttp fork
 - `safe/` — Encrypt/decrypt utility UI
 - `passkey/` — WebAuthn passkey support
 
 **Other:**
 - `tools/tld.js` — Public suffix list for domain matching
-- `_locales/` — i18n (en, de, es, fr, ja, it, nl, lv)
+- `_locales/` — i18n (en, ru fully keyed for the save form; other locales carry only `description`). Pages opt in with `tools/i18n.js` (`data-i18n`, `data-i18n-title`, `data-i18n-placeholder`)
 
 ## Key Patterns
 
