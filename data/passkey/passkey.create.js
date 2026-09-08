@@ -146,6 +146,23 @@ const injectm = o => {
       },
       getClientExtensionResults() {
         return publicKey?.response?.clientExtensionResults || {};
+      },
+      // Ported from upstream 134f5b8 ("fixes #91"). Sites that post the
+      // registration result with JSON.stringify() rely on this; without it the
+      // ArrayBuffer fields serialize to {} and registration fails server-side.
+      toJSON() {
+        return {
+          id: this.id,
+          rawId: base64.encode(this.rawId),
+          response: {
+            clientDataJSON: base64.encode(this.response.clientDataJSON),
+            attestationObject: base64.encode(this.response.attestationObject),
+            transports: typeof this.response.getTransports === 'function' ? this.response.getTransports() : ['internal']
+          },
+          type: this.type,
+          authenticatorAttachment: this.authenticatorAttachment,
+          clientExtensionResults: this.getClientExtensionResults()
+        };
       }
     };
     Object.setPrototypeOf(publicKeyCredential, PublicKeyCredential.prototype);
