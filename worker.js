@@ -206,6 +206,55 @@ copy.interface = async content => {
   });
 };
 
+// Opens the "save login" form for a tab. sidePanel.open() needs a user gesture,
+// and a message coming from a content script does not carry one into the
+// worker, so fall back to a popup window when the panel refuses to open.
+const openSaveForm = async tab => {
+  const path = '/data/save/index.html?tab=' + tab.id;
+  try {
+    await chrome.sidePanel.setOptions({tabId: tab.id, path, enabled: true});
+    await chrome.sidePanel.open({tabId: tab.id});
+    return;
+  }
+  catch (e) {
+    console.info('[save-form] side panel unavailable, using a window:', e.message);
+  }
+  const width = 420;
+  const height = 640;
+  const win = await chrome.windows.getCurrent().catch(() => null);
+  chrome.windows.create({
+    url: path,
+    width,
+    height,
+    left: win ? Math.max(0, win.left + win.width - width - 40) : undefined,
+    top: win ? win.top + 80 : undefined,
+    type: 'popup'
+  });
+};
+
+// Generates a password with the same preferences the save form stores, so the
+// value typed into the page matches what the form would have produced.
+const generatePassword = async () => {
+  const key = 'kp-password-generator-prefs';
+  const prefs = (await chrome.storage.local.get({[key]: null}))[key];
+  const mode = prefs && prefs.mode === 'charset' ? 'charset' : 'diceware';
+  if (mode === 'charset') {
+    const c = (prefs && prefs.charset) || {};
+    return self.__kpPasswordGen.charset({
+      length1: c.length1 ?? 14,
+      length2: c.length2 ?? 3
+    });
+  }
+  const d = (prefs && prefs.diceware) || {};
+  return self.__kpPasswordGen.diceware({
+    wordCount: d.wordCount ?? 5,
+    separator: d.separator ?? '-',
+    capitalize: d.capitalize !== false,
+    appendDigits: d.appendDigits ?? 1,
+    appendSymbols: d.appendSymbols ?? 1
+  });
+};
+
 // messaging
 chrome.runtime.onMessage.addListener((request, sender, response) => {
   if (request.cmd === 'close-me') {
@@ -385,6 +434,51 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         console.warn('hints-fill:', e);
       }
     })();
+  }
+  else if (request.cmd === 'hints-save-form') {
+    (async () => {
+      const tab = sender.tab;
+      if (!tab || !tab.id) {
+        return {ok: false};
+      }
+      const frameIds = [sender.frameId ?? 0];
+      let password = request.password || '';
+      // Registration case: the page password field is empty, so mint a value,
+      // type it into the page and hand the same one to the form.
+      if (!password && request.generate) {
+        password = await generatePassword();
+        await chrome.scripting.executeScript({
+          target: {tabId: tab.id, frameIds},
+          files: ['/data/helper.js']
+        });
+        await chrome.scripting.executeScript({
+          target: {tabId: tab.id, frameIds},
+          func: value => {
+            const field = document.activeElement;
+            if (field && field.tagName === 'INPUT' && field.type === 'password') {
+              self.setInputValue(field, value);
+            }
+          },
+          args: [password]
+        });
+      }
+      await chrome.storage.session.set({
+        ['kp-save-form:' + tab.id]: {
+          url: request.url || tab.url,
+          favicon: tab.favIconUrl,
+          pairs: [{
+            usernames: request.login ? [request.login] : [],
+            passwords: password ? [password] : []
+          }]
+        }
+      });
+      await openSaveForm(tab);
+      return {ok: true};
+    })().then(response).catch(e => {
+      console.warn('hints-save-form:', e);
+      response({ok: false, error: e.message});
+    });
+    return true;
   }
   else if (request.cmd === 'hints-report-unwanted') {
     (async () => {

@@ -13,6 +13,7 @@
   const {
     normalizeLogin,
     createFormStateStore,
+    formContextRoot,
     rememberLoginForField: rememberLoginForFieldImpl,
     sortedEntriesForField: sortedEntriesForFieldImpl
   } = self.__kpFormContext;
@@ -22,6 +23,17 @@
     ignoredFieldKey
   } = self.__kpIgnoredFields;
   const {dropdownLayout} = self.__kpHintsLayout;
+
+  // Localized label with the English text as the fallback, so a locale that has
+  // no key still renders a readable dropdown instead of empty buttons.
+  const t = (key, fallback) => {
+    try {
+      return chrome.i18n.getMessage(key) || fallback;
+    }
+    catch (e) {
+      return fallback;
+    }
+  };
 
   const CACHE_TTL = 30000;
 
@@ -175,6 +187,19 @@
         padding: 3px 8px;
       }
       .kp-empty-action:hover { color: #fff; border-color: #aaa; }
+      .kp-empty-actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .kp-empty-action.kp-primary {
+        background: #4875bf;
+        border-color: #4875bf;
+        color: #fff;
+      }
+      .kp-empty-action.kp-primary:hover { filter: brightness(1.12); border-color: #4875bf; }
       .kp-footer {
         display: flex;
         justify-content: space-between;
@@ -229,6 +254,44 @@
     list.style.width = width + 'px';
   };
 
+  /* ---- Create a new entry from the page ---- */
+
+  // inferLoginFromForm() lowercases for matching; a stored entry deserves the
+  // value exactly as it was typed, so read the field directly here.
+  const pageLogin = el => {
+    const node = formContextRoot(el);
+    if (!node) return '';
+    const inputs = [...(node.querySelectorAll?.('input') || [])]
+      .filter(input => input !== el && input.offsetParent);
+    const field = inputs.find(input => {
+      const type = (input.type || '').toLowerCase();
+      if (type && type !== 'text' && type !== 'email' && type !== 'tel') return false;
+      return isLoginField(input) && !isPasswordField(input) && !isOTPField(input);
+    });
+    return (field?.value || '').trim();
+  };
+
+  // Opens the save form for the current page. On a registration form the
+  // password field is still empty, so the worker mints one, types it into the
+  // page and hands the same value to the form.
+  const createEntry = () => {
+    const field = activeField;
+    const password = isPasswordField(field) ? (field.value || '') : '';
+    const generate = isPasswordField(field) && !password;
+    hide();
+    try {
+      if (!chrome?.runtime?.id) return;
+      chrome.runtime.sendMessage({
+        cmd: 'hints-save-form',
+        url: location.href,
+        login: pageLogin(field),
+        password,
+        generate
+      }).catch(() => {});
+    }
+    catch (e) {}
+  };
+
   /* ---- Render entries ---- */
   const render = items => {
     createHost();
@@ -245,7 +308,7 @@
       searchWrap.className = 'kp-search';
       const searchInput = document.createElement('input');
       searchInput.type = 'search';
-      searchInput.placeholder = 'Search KeePass by login, title or URL';
+      searchInput.placeholder = t('hints_search_placeholder', 'Search KeePass by login, title or URL');
       searchInput.value = manualQuery;
       searchInput.setAttribute('aria-label', searchInput.placeholder);
       searchInput.addEventListener('mousedown', ev => ev.stopPropagation());
@@ -279,11 +342,31 @@
       const d = document.createElement('div');
       d.className = 'kp-empty';
       const message = document.createElement('span');
-      message.textContent = 'No credentials found';
+      message.textContent = t('hints_empty', 'No credentials found');
+      const actions = document.createElement('div');
+      actions.className = 'kp-empty-actions';
+      // Nothing stored for this site is the signal for "I am registering".
+      // Offer the save form right here instead of the extension menu.
+      if (!isOTPField(activeField)) {
+        const createBtn = document.createElement('button');
+        createBtn.className = 'kp-empty-action kp-primary';
+        createBtn.textContent = isPasswordField(activeField) ?
+          t('hints_create_generate', 'Generate and save') :
+          t('hints_create', 'Save a new login');
+        createBtn.title = isPasswordField(activeField) ?
+          t('hints_create_generate_hint', 'Generate a password, type it into this field and open the save form') :
+          t('hints_create_hint', 'Open the save form for this site');
+        createBtn.addEventListener('mousedown', ev => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          createEntry();
+        });
+        actions.appendChild(createBtn);
+      }
       const ignoreBtn = document.createElement('button');
       ignoreBtn.className = 'kp-empty-action';
-      ignoreBtn.textContent = 'Hide for this field';
-      ignoreBtn.title = 'Do not show KeePass hints for this field on this site';
+      ignoreBtn.textContent = t('hints_hide_field', 'Hide for this field');
+      ignoreBtn.title = t('hints_hide_field_hint', 'Do not show KeePass hints for this field on this site');
       ignoreBtn.addEventListener('mousedown', ev => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -291,7 +374,8 @@
         rememberIgnoredField(field);
         reportUnwanted(field);
       });
-      d.append(message, ignoreBtn);
+      actions.appendChild(ignoreBtn);
+      d.append(message, actions);
       list.appendChild(d);
     }
     items.forEach((e, i) => {
@@ -323,18 +407,20 @@
     left.className = 'kp-footer-left';
     const refreshBtn = document.createElement('button');
     refreshBtn.className = 'kp-footer-btn';
-    refreshBtn.textContent = 'Refresh';
+    refreshBtn.textContent = t('hints_refresh', 'Refresh');
     refreshBtn.addEventListener('mousedown', async ev => {
       ev.preventDefault();
       ev.stopPropagation();
       refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Refreshing...';
+      refreshBtn.textContent = t('hints_refreshing', 'Refreshing...');
       await refresh();
     });
     const reportBtn = document.createElement('button');
     reportBtn.className = 'kp-report-btn';
-    reportBtn.textContent = isOTPField(activeField) ? 'Hide for this field' : '\u2717 not a login field';
-    reportBtn.title = 'Do not show KeePass hints for this field on this site';
+    reportBtn.textContent = isOTPField(activeField) ?
+      t('hints_hide_field', 'Hide for this field') :
+      '\u2717 ' + t('hints_not_login_field', 'not a login field');
+    reportBtn.title = t('hints_hide_field_hint', 'Do not show KeePass hints for this field on this site');
     reportBtn.addEventListener('mousedown', ev => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -343,6 +429,19 @@
       reportUnwanted(field);
     });
     left.appendChild(refreshBtn);
+    // Also reachable when entries exist: a second account on the same site.
+    if (!isOTPField(activeField)) {
+      const newBtn = document.createElement('button');
+      newBtn.className = 'kp-footer-btn';
+      newBtn.textContent = '+ ' + t('hints_new', 'New');
+      newBtn.title = t('hints_new_hint', 'Save a new login for this site');
+      newBtn.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        createEntry();
+      });
+      left.appendChild(newBtn);
+    }
     footer.appendChild(left);
     if (items.length) footer.appendChild(reportBtn);
     list.appendChild(footer);
