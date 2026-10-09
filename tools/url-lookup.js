@@ -80,17 +80,8 @@
   const searchWithUrlFallback = async (search, href) => {
     const candidates = lookupUrlCandidates(href);
     const exact = await search(candidates[0]);
-    const exactEntries = exact?.Entries || [];
     const seen = new Set();
-
-    if (exactEntries.length) {
-      return {
-        ...exact,
-        Entries: taggedEntries(exactEntries, candidates[0], seen)
-      };
-    }
-
-    const entries = [];
+    const entries = taggedEntries(exact?.Entries || [], candidates[0], seen);
     for (const candidate of candidates.slice(1)) {
       const response = await search(candidate);
       entries.push(...taggedEntries(response?.Entries || [], candidate, seen));
@@ -104,9 +95,20 @@
   const isLookupCandidate = (href, candidate) =>
     lookupUrlCandidates(href).includes(candidate);
 
+  const linkOrigin = href => {
+    try {
+      const url = new URL(href);
+      return ['http:', 'https:'].includes(url.protocol) ? url.origin : null;
+    }
+    catch {
+      return null;
+    }
+  };
+
   return {
     lookupUrlCandidates,
     searchWithUrlFallback,
-    isLookupCandidate
+    isLookupCandidate,
+    linkOrigin
   };
 });

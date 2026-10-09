@@ -10,6 +10,7 @@ self.kdbxweb = {};
 importScripts(
   '/tools/tld.js',
   '/tools/url-lookup.js',
+  '/tools/hints-target.js',
   '/tools/scriptable-url.js',
   '/connect/SecureSyncedDB.js',
   '/connect/api.js',
@@ -26,7 +27,8 @@ importScripts(
   '/tools/password-gen.js'
 );
 
-const {searchWithUrlFallback, isLookupCandidate} = self.__kpUrlLookup;
+const {searchWithUrlFallback, isLookupCandidate, linkOrigin} = self.__kpUrlLookup;
+const {senderScriptTarget} = self.__kpHintsTarget;
 const {isScriptableUrl} = self.__kpScriptableUrl;
 
 const current = () => chrome.tabs.query({
@@ -158,12 +160,31 @@ const hints = {
       throw Error('UUID lookup requires KeePassHTTP 2.3.1 or newer');
     }
     return engine.core.getByUuid(uuid);
+  },
+  async linkCurrentSite(uuid, pageUrl) {
+    await this.ensureReady();
+    if (!this.ready || engine.type !== 'keepass' || !engine.core.set) {
+      return {ok: false, code: 'unsupported'};
+    }
+    const origin = linkOrigin(pageUrl);
+    if (!origin) {
+      return {ok: false, code: 'invalid-url'};
+    }
+    const result = await engine.core.set({
+      uuid,
+      url: origin,
+      onlyIfUrlEmpty: true
+    });
+    if (!result?.Success) {
+      return {ok: false, code: result?.Error || 'update-failed'};
+    }
+    return {ok: true, origin};
   }
 };
 
 const entryOTP = entry => OTPResolve.get(entry);
 
-const copy = async (content, tab) => {
+const copy = async (content, tab, frameId) => {
   // Firefox
   try {
     await navigator.clipboard.writeText(content);
@@ -173,7 +194,8 @@ const copy = async (content, tab) => {
     try {
       await chrome.scripting.executeScript({
         target: {
-          tabId: tab.id
+          tabId: tab.id,
+          ...(Number.isInteger(frameId) ? {frameIds: [frameId]} : {})
         },
         func: password => {
           navigator.clipboard.writeText(password).then(() => chrome.runtime.sendMessage({
@@ -324,7 +346,9 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         Login: e.Login || '',
         Name: e.Name || '',
         group: e.Group?.Name || '',
-        uuid: e.Uuid || ''
+        uuid: e.Uuid || '',
+        hasUrl: typeof e.HasUrl === 'boolean' ? e.HasUrl : null,
+        canLink: e.HasUrl === false && e.SupportsConditionalUrlUpdate === true
       })).filter(e => e.uuid);
       response({entries, ok: true});
     }).catch(e => {
@@ -337,10 +361,25 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
     });
     return true;
   }
+  else if (request.cmd === 'hints-link-current-site') {
+    const uuid = String(request.uuid || '');
+    if (!/^[0-9a-f]{32}$/i.test(uuid)) {
+      response({ok: false, code: 'invalid-entry'});
+      return false;
+    }
+    // Use the frame that rendered the confirmation. For cross-origin login
+    // iframes, sender.tab.url would save a different origin than the user saw.
+    hints.linkCurrentSite(uuid, sender.url || sender.tab?.url || '').then(response).catch(e => {
+      console.warn('hints-link-current-site:', e);
+      response({ok: false, code: 'update-failed'});
+    });
+    return true;
+  }
   else if (request.cmd === 'hints-fill') {
     (async () => {
       try {
-        const tab = sender.tab;
+        const scriptTarget = senderScriptTarget(sender);
+        if (!scriptTarget) return;
         let entry;
         if (request.uuid) {
           const r = await hints.getByUuid(request.uuid);
@@ -365,14 +404,14 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
           // but content scripts live in the isolated world; we need __kpHints in
           // the main world so the executeScript func below can reach it.
           await chrome.scripting.executeScript({
-            target: {tabId: tab.id},
-            files: ['/data/helper.js', '/data/hints/heuristics.js']
+            target: scriptTarget,
+            files: ['/data/helper.js', '/data/hints/heuristics.js', '/tools/hints-field.js']
           });
           await chrome.scripting.executeScript({
-            target: {tabId: tab.id},
+            target: scriptTarget,
             func: otp => {
               const {isOTPField} = self.__kpHints;
-              const active = document.activeElement;
+              const active = self.__kpHintsField.takeHintField(self, document);
               const candidates = [...document.querySelectorAll('input')].filter(e => e.offsetParent);
               const field = isOTPField(active) ? active : (candidates.find(isOTPField) || active);
               if (!field || field.tagName !== 'INPUT') return;
@@ -388,16 +427,16 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         // Inject helper.js (setInputValue/detectForm) and heuristics.js
         // (USER_RE) into the page's isolated world.
         await chrome.scripting.executeScript({
-          target: {tabId: tab.id},
-          files: ['/data/helper.js', '/data/hints/heuristics.js']
+          target: scriptTarget,
+          files: ['/data/helper.js', '/data/hints/heuristics.js', '/tools/hints-field.js']
         });
 
         // Fill credentials via executeScript — password never touches content script
         await chrome.scripting.executeScript({
-          target: {tabId: tab.id},
+          target: scriptTarget,
           func: (username, password) => {
             const {USER_RE} = self.__kpHints;
-            const active = document.activeElement;
+            const active = self.__kpHintsField.takeHintField(self, document);
             // Find the form context
             const form = self.detectForm
               ? self.detectForm(active)
@@ -434,6 +473,70 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         console.warn('hints-fill:', e);
       }
     })();
+  }
+  else if (request.cmd === 'hints-entry-action') {
+    (async () => {
+      const uuid = String(request.uuid || '');
+      const field = request.field === 'password' ? 'password' :
+        request.field === 'login' ? 'login' : '';
+      const action = request.action === 'copy' ? 'copy' :
+        request.action === 'fill' ? 'fill' : '';
+      const scriptTarget = senderScriptTarget(sender);
+      if (!/^[0-9a-f]{32}$/i.test(uuid) || !field || !action || !scriptTarget) {
+        return {ok: false, code: 'invalid-request'};
+      }
+
+      const result = await hints.getByUuid(uuid);
+      const entry = (result.Entries || [])[0];
+      if (!entry) return {ok: false, code: 'entry-not-found'};
+      const value = field === 'password' ? (entry.Password || '') : (entry.Login || '');
+      if (!value) return {ok: false, code: 'empty-value'};
+
+      if (action === 'copy') {
+        await copy(value, sender.tab, sender.frameId);
+        return {ok: true};
+      }
+
+      await chrome.scripting.executeScript({
+        target: scriptTarget,
+        files: ['/data/helper.js', '/data/hints/heuristics.js', '/tools/hints-field.js']
+      });
+      const injection = await chrome.scripting.executeScript({
+        target: scriptTarget,
+        func: (value, field) => {
+          const active = self.__kpHintsField.takeHintField(self, document);
+          const visible = element => Boolean(element?.offsetParent);
+          let target;
+          if (field === 'password') {
+            target = active?.matches?.('input[type=password]') && visible(active) ? active :
+              [...document.querySelectorAll('input[type=password]')].find(visible);
+          }
+          else {
+            const {USER_RE} = self.__kpHints;
+            const isLoginCandidate = element => {
+              if (!visible(element)) return false;
+              const type = (element.type || '').toLowerCase();
+              return ['text', 'email', 'tel', 'search', 'url', 'number', ''].includes(type);
+            };
+            const candidates = [...document.querySelectorAll('input')].filter(isLoginCandidate);
+            target = isLoginCandidate(active) ? active :
+              candidates.find(element => {
+                const hint = `${element.name} ${element.id} ${element.getAttribute('autocomplete') || ''}`;
+                return USER_RE.test(hint);
+              }) || candidates[0];
+          }
+          if (!target) return false;
+          self.setInputValue(target, value);
+          return target.value === value;
+        },
+        args: [value, field]
+      });
+      return {ok: injection.some(item => item.result === true)};
+    })().then(response).catch(e => {
+      console.warn('hints-entry-action:', e);
+      response({ok: false, code: 'action-failed'});
+    });
+    return true;
   }
   else if (request.cmd === 'hints-save-form') {
     (async () => {

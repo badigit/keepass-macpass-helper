@@ -152,6 +152,9 @@
   "hints_search_placeholder": {
     "message": "Поиск в KeePass по логину, названию или адресу"
   },
+  "hints_search": {
+    "message": "Поиск"
+  },
   "hints_empty": {
     "message": "Ничего не найдено"
   },
@@ -187,5 +190,68 @@
   },
   "hints_new_hint": {
     "message": "Сохранить ещё один логин для этого сайта"
+  },
+  "hints_link_site": {
+    "message": "Привязать сайт"
+  },
+  "hints_link_site_short": {
+    "message": "+URL"
+  },
+  "hints_link_site_hint": {
+    "message": "Сохранить этот сайт в выбранной записи KeePass"
+  },
+  "hints_fill_login_short": {
+    "message": "Л\u2193"
+  },
+  "hints_copy_login_short": {
+    "message": "Л\u29c9"
+  },
+  "hints_fill_password_short": {
+    "message": "П\u2193"
+  },
+  "hints_copy_password_short": {
+    "message": "П\u29c9"
+  },
+  "hints_fill_login": {
+    "message": "Подставить логин"
+  },
+  "hints_copy_login": {
+    "message": "Скопировать логин"
+  },
+  "hints_fill_password": {
+    "message": "Подставить пароль"
+  },
+  "hints_copy_password": {
+    "message": "Скопировать пароль"
+  },
+  "hints_entry_action_error": {
+    "message": "Не удалось выполнить действие"
+  },
+  "hints_link_confirm_prefix": {
+    "message": "Привязать"
+  },
+  "hints_link_confirm_middle": {
+    "message": "к"
+  },
+  "hints_link_cancel": {
+    "message": "Отмена"
+  },
+  "hints_link_confirm_button": {
+    "message": "Привязать"
+  },
+  "hints_linking": {
+    "message": "Привязываю..."
+  },
+  "hints_linked": {
+    "message": "Сайт привязан"
+  },
+  "hints_link_conflict": {
+    "message": "В записи уже есть адрес, изменения не внесены"
+  },
+  "hints_link_unsupported": {
+    "message": "Обновите KeePassHTTP, чтобы привязать сайт"
+  },
+  "hints_link_error": {
+    "message": "Не удалось привязать сайт"
   }
 }

@@ -50,8 +50,11 @@
   let closeTimer = null;
   let suppressUntil = 0;
   let manualQuery = '';
+  let manualSearchOpen = false;
   let manualSearchTimer = null;
   let manualSearchSequence = 0;
+  let pendingLink = null;
+  let linkNotice = '';
   const formStateStore = createFormStateStore();
   let ignoredFields = new Set();
 
@@ -111,6 +114,7 @@
       }
       .kp-dropdown.open { display: block; }
       .kp-row {
+        box-sizing: border-box;
         display: grid;
         gap: 8px;
         padding: 0 8px;
@@ -119,7 +123,9 @@
         cursor: default;
         white-space: nowrap;
         overflow: hidden;
+        position: relative;
       }
+      .kp-row.kp-actionable { padding-right: var(--kp-actions-width, 124px); }
       .kp-dropdown[data-columns="login"] .kp-row {
         grid-template-columns: minmax(0, 1fr);
       }
@@ -134,6 +140,30 @@
       }
       .kp-row > span { overflow: hidden; text-overflow: ellipsis; }
       .kp-row:hover, .kp-row.active { background: #4875bf; color: #fff; }
+      .kp-row-actions {
+        position: absolute;
+        right: 4px;
+        top: 3px;
+        display: flex;
+        gap: 2px;
+      }
+      .kp-mini-action {
+        box-sizing: border-box;
+        min-width: 24px;
+        height: 22px;
+        border: 1px solid #777;
+        border-radius: 3px;
+        background: #333;
+        color: #cfe0ff;
+        font: inherit;
+        font-size: 11px;
+        line-height: 20px;
+        padding: 0 4px;
+        cursor: pointer;
+      }
+      .kp-mini-action.kp-link-btn { min-width: 42px; }
+      .kp-mini-action:hover { border-color: #cfe0ff; color: #fff; }
+      .kp-mini-action:disabled { cursor: wait; opacity: .65; }
       .kp-search {
         display: flex;
         position: sticky;
@@ -143,6 +173,7 @@
         border-bottom: 1px solid #444;
         z-index: 1;
       }
+      .kp-search[hidden] { display: none; }
       .kp-search input {
         box-sizing: border-box;
         width: 100%;
@@ -155,6 +186,25 @@
         outline: none;
       }
       .kp-search input:focus { border-color: #9ec1ff; }
+      .kp-link-confirm,
+      .kp-notice {
+        padding: 8px;
+        border-bottom: 1px solid #555;
+        color: #ddd;
+        line-height: 1.35;
+      }
+      .kp-notice { color: #9fe0ad; }
+      .kp-link-actions { display: flex; gap: 6px; margin-top: 7px; }
+      .kp-link-actions button {
+        border: 1px solid #777;
+        border-radius: 3px;
+        background: #333;
+        color: #ddd;
+        font: inherit;
+        padding: 3px 8px;
+        cursor: pointer;
+      }
+      .kp-link-actions .kp-primary { background: #4875bf; border-color: #4875bf; color: #fff; }
       .kp-mode {
         display: flex;
         justify-content: flex-end;
@@ -303,30 +353,101 @@
     list.dataset.columns = layout.key;
     list.dataset.minWidth = layout.minWidth;
 
-    if (!items.length || manualQuery) {
-      const searchWrap = document.createElement('div');
-      searchWrap.className = 'kp-search';
-      const searchInput = document.createElement('input');
-      searchInput.type = 'search';
-      searchInput.placeholder = t('hints_search_placeholder', 'Search KeePass by login, title or URL');
-      searchInput.value = manualQuery;
-      searchInput.setAttribute('aria-label', searchInput.placeholder);
-      searchInput.addEventListener('mousedown', ev => ev.stopPropagation());
-      searchInput.addEventListener('keydown', ev => {
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'kp-search';
+    searchWrap.hidden = !manualSearchOpen;
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.placeholder = t('hints_search_placeholder', 'Search KeePass by login, title or URL');
+    searchInput.value = manualQuery;
+    searchInput.setAttribute('aria-label', searchInput.placeholder);
+    searchInput.addEventListener('mousedown', ev => ev.stopPropagation());
+    searchInput.addEventListener('keydown', ev => {
+      ev.stopPropagation();
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        activeField?.focus();
+        hide();
+      }
+    });
+    searchInput.addEventListener('input', () => {
+      manualQuery = searchInput.value.trim();
+      clearTimeout(manualSearchTimer);
+      manualSearchTimer = setTimeout(runManualSearch, 250);
+    });
+    searchWrap.appendChild(searchInput);
+    list.appendChild(searchWrap);
+
+    if (linkNotice) {
+      const notice = document.createElement('div');
+      notice.className = 'kp-notice';
+      notice.textContent = linkNotice;
+      list.appendChild(notice);
+    }
+
+    if (pendingLink) {
+      const confirmation = document.createElement('div');
+      confirmation.className = 'kp-link-confirm';
+      const label = pendingLink.Name || pendingLink.Login;
+      const text = document.createElement('div');
+      text.textContent = `${t('hints_link_confirm_prefix', 'Attach')} ${location.origin} ` +
+        `${t('hints_link_confirm_middle', 'to')} “${label}”?`;
+      const actions = document.createElement('div');
+      actions.className = 'kp-link-actions';
+      const cancel = document.createElement('button');
+      cancel.textContent = t('hints_link_cancel', 'Cancel');
+      cancel.addEventListener('mousedown', ev => {
+        ev.preventDefault();
         ev.stopPropagation();
-        if (ev.key === 'Escape') {
-          ev.preventDefault();
-          activeField?.focus();
-          hide();
+        pendingLink = null;
+        render(items);
+        shadow.querySelector('.kp-search input')?.focus();
+      });
+      const confirm = document.createElement('button');
+      confirm.className = 'kp-primary';
+      confirm.textContent = t('hints_link_confirm_button', 'Attach');
+      confirm.addEventListener('mousedown', async ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        confirm.disabled = true;
+        confirm.textContent = t('hints_linking', 'Attaching...');
+        clearTimeout(manualSearchTimer);
+        manualSearchSequence += 1;
+        const selected = pendingLink;
+        try {
+          const result = await chrome.runtime.sendMessage({
+            cmd: 'hints-link-current-site',
+            uuid: selected.uuid
+          });
+          if (!result?.ok) {
+            if (result?.code === 'url-not-empty') selected.hasUrl = true;
+            pendingLink = null;
+            linkNotice = result?.code === 'url-not-empty' ?
+              t('hints_link_conflict', 'The entry already has a URL and was not changed') :
+              result?.code === 'unsupported' ?
+                t('hints_link_unsupported', 'Update KeePassHTTP to attach a site') :
+                t('hints_link_error', 'Could not attach the site');
+            render(items);
+            shadow.querySelector('.kp-search input')?.focus();
+            return;
+          }
+          pendingLink = null;
+          linkNotice = t('hints_linked', 'Site attached');
+          manualQuery = '';
+          cacheUrl = '';
+          cacheTime = 0;
+          await refresh();
+        }
+        catch {
+          pendingLink = null;
+          linkNotice = t('hints_link_error', 'Could not attach the site');
+          render(items);
+          shadow.querySelector('.kp-search input')?.focus();
         }
       });
-      searchInput.addEventListener('input', () => {
-        manualQuery = searchInput.value.trim();
-        clearTimeout(manualSearchTimer);
-        manualSearchTimer = setTimeout(runManualSearch, 250);
-      });
-      searchWrap.appendChild(searchInput);
-      list.appendChild(searchWrap);
+      actions.append(cancel, confirm);
+      confirmation.append(text, actions);
+      list.appendChild(confirmation);
     }
 
     if (isOTPField(activeField)) {
@@ -389,6 +510,83 @@
         cell.title = e[field] || '';
         row.appendChild(cell);
       }
+
+      const rowActions = document.createElement('div');
+      rowActions.className = 'kp-row-actions';
+      const addEntryAction = (field, action, labelKey, labelFallback, titleKey, titleFallback) => {
+        const button = document.createElement('button');
+        button.className = 'kp-mini-action';
+        button.textContent = t(labelKey, labelFallback);
+        button.title = t(titleKey, titleFallback);
+        button.setAttribute('aria-label', button.title);
+        button.addEventListener('mousedown', async ev => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          button.disabled = true;
+          const originalText = button.textContent;
+          try {
+            if (action === 'fill') self.__kpHintsActiveField = activeField;
+            const result = await chrome.runtime.sendMessage({
+              cmd: 'hints-entry-action',
+              uuid: e.uuid,
+              field,
+              action
+            });
+            if (!result?.ok) throw new Error(result?.code || 'action-failed');
+            button.textContent = '\u2713';
+            if (action === 'fill') {
+              suppressUntil = Date.now() + 600;
+              hide();
+              return;
+            }
+            setTimeout(() => {
+              if (button.isConnected) {
+                button.textContent = originalText;
+                button.disabled = false;
+              }
+            }, 800);
+          }
+          catch {
+            button.disabled = false;
+            linkNotice = t('hints_entry_action_error', 'Could not perform the action');
+            render(items);
+            shadow.querySelector('.kp-search input')?.focus();
+          }
+        });
+        rowActions.appendChild(button);
+      };
+
+      if (manualQuery && e.uuid) {
+        addEntryAction('login', 'fill', 'hints_fill_login_short', 'U\u2193',
+          'hints_fill_login', 'Fill login');
+        addEntryAction('login', 'copy', 'hints_copy_login_short', 'U\u29c9',
+          'hints_copy_login', 'Copy login');
+        addEntryAction('password', 'fill', 'hints_fill_password_short', 'P\u2193',
+          'hints_fill_password', 'Fill password');
+        addEntryAction('password', 'copy', 'hints_copy_password_short', 'P\u29c9',
+          'hints_copy_password', 'Copy password');
+      }
+      if (manualQuery && e.canLink === true && e.uuid) {
+        const linkBtn = document.createElement('button');
+        linkBtn.className = 'kp-mini-action kp-link-btn';
+        linkBtn.textContent = t('hints_link_site_short', '+URL');
+        linkBtn.title = t('hints_link_site_hint', 'Save this site in the selected KeePass entry');
+        linkBtn.setAttribute('aria-label', linkBtn.title);
+        linkBtn.addEventListener('mousedown', ev => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          pendingLink = e;
+          linkNotice = '';
+          render(items);
+        });
+        rowActions.appendChild(linkBtn);
+      }
+      if (rowActions.childElementCount) {
+        row.classList.add('kp-actionable');
+        row.style.setProperty('--kp-actions-width', `${rowActions.childElementCount * 26 +
+          (rowActions.querySelector('.kp-link-btn') ? 20 : 0) + 8}px`);
+        row.appendChild(rowActions);
+      }
       list.appendChild(row);
 
       // mousedown fires before focusout — prevents dropdown from closing
@@ -428,6 +626,20 @@
       rememberIgnoredField(field);
       reportUnwanted(field);
     });
+    const searchBtn = document.createElement('button');
+    searchBtn.className = 'kp-footer-btn';
+    searchBtn.textContent = t('hints_search', 'Search');
+    searchBtn.setAttribute('aria-expanded', String(manualSearchOpen));
+    searchBtn.addEventListener('mousedown', ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      manualSearchOpen = true;
+      searchWrap.hidden = false;
+      searchBtn.setAttribute('aria-expanded', 'true');
+      searchInput.focus();
+      position();
+    });
+    left.appendChild(searchBtn);
     left.appendChild(refreshBtn);
     // Also reachable when entries exist: a second account on the same site.
     if (!isOTPField(activeField)) {
@@ -506,6 +718,10 @@
   const pick = idx => {
     const item = visibleEntries[idx];
     if (!item) return;
+    // Manual search moves focus into the extension's shadow DOM. Preserve the
+    // original page input so the worker can use the same exact-field strategy
+    // as the popup instead of guessing among the page's visible inputs.
+    self.__kpHintsActiveField = activeField;
     if (!isPasswordField(activeField) && !isOTPField(activeField)) {
       rememberLoginForField(activeField, item.Login);
     }
@@ -598,6 +814,8 @@
   const runManualSearch = async () => {
     const query = manualQuery;
     const sequence = ++manualSearchSequence;
+    pendingLink = null;
+    linkNotice = '';
     if (!query) {
       render(sortedEntriesForField(entries, activeField));
       shadow.querySelector('.kp-search input')?.focus();
@@ -647,6 +865,7 @@
       force: refreshSearch
     });
     manualQuery = '';
+    manualSearchOpen = items.length === 0;
     if (!activeField.isConnected) return;
     if (hasValue(activeField)) {
       hide();

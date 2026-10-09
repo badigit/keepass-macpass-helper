@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const {
   lookupUrlCandidates,
   searchWithUrlFallback,
-  isLookupCandidate
+  isLookupCandidate,
+  linkOrigin
 } = require('../tools/url-lookup.js');
 
 test('lookup candidates are exact-first and public-suffix-aware', () => {
@@ -29,17 +30,52 @@ test('non-web and invalid URLs do not get fallback candidates', () => {
   assert.deepEqual(lookupUrlCandidates('not a URL'), ['not a URL']);
 });
 
-test('an exact result prevents all fallback requests', async () => {
+test('site linking keeps only the current HTTP origin', () => {
+  assert.equal(
+    linkOrigin('https://sso.example.com/login?continue=https://other.example/'),
+    'https://sso.example.com'
+  );
+  assert.equal(linkOrigin('chrome://settings/'), null);
+  assert.equal(linkOrigin('not a URL'), null);
+});
+
+test('exact and domain results are merged with exact entries first', async () => {
   const calls = [];
+  const responses = new Map([
+    ['https://sso.example.com/login', [
+      {Uuid: 'exact', Login: 'alice'},
+      {Uuid: 'duplicate', Login: 'shared'}
+    ]],
+    ['https://www.example.com/', [
+      {Uuid: 'domain', Login: 'bob'},
+      {Uuid: 'duplicate', Login: 'shared'}
+    ]],
+    ['https://example.com/', [
+      {Uuid: 'apex', Login: 'carol'}
+    ]]
+  ]);
   const result = await searchWithUrlFallback(async url => {
     calls.push(url);
-    return {Entries: [{Uuid: 'exact', Login: 'alice'}]};
+    return {Entries: responses.get(url) || []};
   }, 'https://sso.example.com/login');
 
-  assert.deepEqual(calls, ['https://sso.example.com/login']);
-  assert.equal(result.Entries[0].Login, 'alice');
+  assert.deepEqual(calls, [
+    'https://sso.example.com/login',
+    'https://www.example.com/',
+    'https://example.com/'
+  ]);
+  assert.deepEqual(result.Entries.map(e => e.Login), [
+    'alice',
+    'shared',
+    'bob',
+    'carol'
+  ]);
   assert.deepEqual(result.Entries[0].__kpLookup, {
     url: 'https://sso.example.com/login',
+    index: 0
+  });
+  assert.deepEqual(result.Entries[2].__kpLookup, {
+    url: 'https://www.example.com/',
     index: 0
   });
 });

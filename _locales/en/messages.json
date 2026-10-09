@@ -152,6 +152,9 @@
   "hints_search_placeholder": {
     "message": "Search KeePass by login, title or URL"
   },
+  "hints_search": {
+    "message": "Search"
+  },
   "hints_empty": {
     "message": "No credentials found"
   },
@@ -187,5 +190,68 @@
   },
   "hints_new_hint": {
     "message": "Save a new login for this site"
+  },
+  "hints_link_site": {
+    "message": "Attach site"
+  },
+  "hints_link_site_short": {
+    "message": "+URL"
+  },
+  "hints_link_site_hint": {
+    "message": "Save this site in the selected KeePass entry"
+  },
+  "hints_fill_login_short": {
+    "message": "U\u2193"
+  },
+  "hints_copy_login_short": {
+    "message": "U\u29c9"
+  },
+  "hints_fill_password_short": {
+    "message": "P\u2193"
+  },
+  "hints_copy_password_short": {
+    "message": "P\u29c9"
+  },
+  "hints_fill_login": {
+    "message": "Fill login"
+  },
+  "hints_copy_login": {
+    "message": "Copy login"
+  },
+  "hints_fill_password": {
+    "message": "Fill password"
+  },
+  "hints_copy_password": {
+    "message": "Copy password"
+  },
+  "hints_entry_action_error": {
+    "message": "Could not perform the action"
+  },
+  "hints_link_confirm_prefix": {
+    "message": "Attach"
+  },
+  "hints_link_confirm_middle": {
+    "message": "to"
+  },
+  "hints_link_cancel": {
+    "message": "Cancel"
+  },
+  "hints_link_confirm_button": {
+    "message": "Attach"
+  },
+  "hints_linking": {
+    "message": "Attaching..."
+  },
+  "hints_linked": {
+    "message": "Site attached"
+  },
+  "hints_link_conflict": {
+    "message": "The entry already has a URL and was not changed"
+  },
+  "hints_link_unsupported": {
+    "message": "Update KeePassHTTP to attach a site"
+  },
+  "hints_link_error": {
+    "message": "Could not attach the site"
   }
 }
