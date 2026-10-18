@@ -314,6 +314,8 @@ document.addEventListener('submit', e => {
 /* ---------- payload from the worker ---------- */
 
 const renderPayload = payload => {
+  // Opening the panel precedes scraping/generation; wait for the final payload.
+  if (payload?.pending) return;
   payload = payload || {pairs: [], url: ''};
   const pair = (payload.pairs || [])
     .filter(a => a.usernames.length || a.passwords.length)
@@ -356,7 +358,7 @@ const renderPayload = payload => {
 const loadPayload = async () => {
   if (!sessionKey) return renderPayload(null);
   const stash = await chrome.storage.session.get(sessionKey);
-  renderPayload(stash[sessionKey]);
+  if (stash[sessionKey]) renderPayload(stash[sessionKey]);
 };
 
 // Generator prefs must be applied before the first payload render, otherwise

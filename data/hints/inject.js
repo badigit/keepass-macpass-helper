@@ -328,6 +328,7 @@
     const field = activeField;
     const password = isPasswordField(field) ? (field.value || '') : '';
     const generate = isPasswordField(field) && !password;
+    self.__kpHintsActiveField = field;
     hide();
     try {
       if (!chrome?.runtime?.id) return;

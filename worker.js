@@ -228,30 +228,12 @@ copy.interface = async content => {
   });
 };
 
-// Opens the "save login" form for a tab. sidePanel.open() needs a user gesture,
-// and a message coming from a content script does not carry one into the
-// worker, so fall back to a popup window when the panel refuses to open.
-const openSaveForm = async tab => {
+// Call from the click/message handler before any await preserves user activation.
+const openSaveForm = tab => {
   const path = '/data/save/index.html?tab=' + tab.id;
-  try {
-    await chrome.sidePanel.setOptions({tabId: tab.id, path, enabled: true});
-    await chrome.sidePanel.open({tabId: tab.id});
-    return;
-  }
-  catch (e) {
-    console.info('[save-form] side panel unavailable, using a window:', e.message);
-  }
-  const width = 420;
-  const height = 640;
-  const win = await chrome.windows.getCurrent().catch(() => null);
-  chrome.windows.create({
-    url: path,
-    width,
-    height,
-    left: win ? Math.max(0, win.left + win.width - width - 40) : undefined,
-    top: win ? win.top + 80 : undefined,
-    type: 'popup'
-  });
+  const configured = chrome.sidePanel.setOptions({tabId: tab.id, path, enabled: true});
+  const opened = chrome.sidePanel.open({tabId: tab.id});
+  return Promise.all([configured, opened]);
 };
 
 // Generates a password with the same preferences the save form stores, so the
@@ -544,6 +526,11 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       if (!tab || !tab.id) {
         return {ok: false};
       }
+      const seeded = chrome.storage.session.set({
+        ['kp-save-form:' + tab.id]: {pending: true}
+      });
+      // Open while the content-script click still carries user activation.
+      await Promise.all([seeded, openSaveForm(tab)]);
       const frameIds = [sender.frameId ?? 0];
       let password = request.password || '';
       // Registration case: the page password field is empty, so mint a value,
@@ -552,12 +539,12 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
         password = await generatePassword();
         await chrome.scripting.executeScript({
           target: {tabId: tab.id, frameIds},
-          files: ['/data/helper.js']
+          files: ['/data/helper.js', '/tools/hints-field.js']
         });
         await chrome.scripting.executeScript({
           target: {tabId: tab.id, frameIds},
           func: value => {
-            const field = document.activeElement;
+            const field = self.__kpHintsField.takeHintField(self, document);
             if (field && field.tagName === 'INPUT' && field.type === 'password') {
               self.setInputValue(field, value);
             }
@@ -575,7 +562,6 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
           }]
         }
       });
-      await openSaveForm(tab);
       return {ok: true};
     })().then(response).catch(e => {
       console.warn('hints-save-form:', e);
