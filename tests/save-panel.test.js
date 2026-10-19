@@ -104,14 +104,16 @@ test('empty final form generates once, preserves empty edits and applies CSS', t
 test('menu scraping keeps usernames and passwords inside the same form', timeout, async () => {
   const forms = ['first', 'second'].map(name => ({
     extendedQuerySelectorAll: selector => selector.includes('password') ? [{value: name + '-password'}] :
-      selector.includes('email') ? [] : [{value: name + '-user'}]
+      selector.includes('email') ? [] : [{tagName: 'INPUT', name: 'username', type: 'text', offsetParent: {}, value: name + '-user', getAttribute: () => null}]
   }));
   const passwords = forms.map(form => ({form, value: 'unused-page-password'}));
   const page = {document: {extendedQuerySelectorAll: () => passwords}, detectForm: field => field.form};
+  page.__kpFormContext = require('../data/hints/form-context.js');
   page.self = page;
   const w = worker({executeScript: async options => options.func ?
     [{result: vm.runInNewContext('(' + options.func + ')()', page)}] : []});
   await w.chrome.contextMenus.onClicked.fire({menuItemId: 'save-form'}, w.activeTab);
   const pairs = w.chrome.storage.session.values['kp-save-form:42'].pairs;
   assert.deepEqual(pairs.map(pair => pair.passwords), [['first-password'], ['second-password']]);
+  assert.deepEqual(pairs.map(pair => pair.usernames), [['first-user'], ['second-user']]);
 });

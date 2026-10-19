@@ -12,7 +12,7 @@ async function main() {
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'kmh-extension-'));
   const server = http.createServer((request, response) => {
     response.setHeader('Content-Type', 'text/html');
-    response.end('<!doctype html><form><input name="username" autocomplete="username" value="fixture-user"><input type="password" name="password" autocomplete="new-password"><button>Sign in</button></form>');
+    response.end('<!doctype html><form><input name="username" autocomplete="username" value="Fixture.User"><input type="password" name="password" autocomplete="new-password"><button>Sign in</button></form>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let context;
@@ -83,7 +83,7 @@ async function main() {
     assert.equal(state.windows.filter(window => window.type === 'popup').length, 0, 'no fallback popup');
     const payload = Object.entries(state.storage).find(([key]) => key.startsWith('kp-save-form:'))[1];
     assert.equal(payload.pending, false);
-    assert.equal(payload.pairs[0].usernames[0], 'fixture-user');
+    assert.equal(payload.pairs[0].usernames[0], 'Fixture.User');
     const generated = await page.locator('[name=password]').inputValue();
     assert.ok(generated.length > 10);
     assert.equal(payload.pairs[0].passwords[0], generated);
@@ -103,6 +103,7 @@ async function main() {
     }
     assert.ok(second.revision > payload.revision);
     assert.equal(second.pending, false);
+    assert.equal(second.pairs[0].usernames[0], 'Fixture.User');
     assert.equal(second.pairs[0].passwords[0], await page.locator('[name=password]').inputValue());
     assert.notEqual(second.pairs[0].passwords[0], generated);
     console.log('PASS real extension: footer New starts a fresh request and replaces the previous payload');

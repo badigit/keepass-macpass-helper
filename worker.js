@@ -743,7 +743,7 @@ const onCommand = async (info, tab) => {
       await openSaveForm(tab, async () => {
         await chrome.scripting.executeScript({
           target: {...target, allFrames: true},
-          files: ['/data/helper.js']
+          files: ['/data/helper.js', '/data/hints/heuristics.js', '/data/hints/form-context.js']
         });
         const r = await chrome.scripting.executeScript({
           target: {...target, allFrames: true},
@@ -753,10 +753,8 @@ const onCommand = async (info, tab) => {
               .map(p => self.detectForm(p, 'input[type=text],input[type=email]'))
               .filter((f, i, l) => f && l.indexOf(f) === i);
             return forms.map(f => {
-              const usernames = [
-                ...f.extendedQuerySelectorAll('input[type=text]'),
-                ...f.extendedQuerySelectorAll('input[type=email]')
-              ].flat().map(e => e.value).filter(s => s);
+              const login = self.__kpFormContext.readLoginFromForm(null, f);
+              const usernames = login ? [login] : [];
               const passwords = f.extendedQuerySelectorAll('input[type=password]').map(e => e.value).filter(s => s);
               return {usernames, passwords};
             });

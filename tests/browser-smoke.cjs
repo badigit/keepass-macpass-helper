@@ -89,6 +89,8 @@ async function main() {
     await page.setViewportSize({width: 360, height: 900});
     await page.goto(base + '/data/save/index.html?tab=42');
     await page.waitForFunction(() => document.getElementById('gen-panel').dataset.mode === 'charset');
+    assert.deepEqual(await page.locator('#f-login, #f-password, #f-url').evaluateAll(fields => fields.map(field => field.name)),
+      ['login', 'password', 'url']);
     for (const [colorScheme, background, field] of [
       ['light', 'rgb(255, 255, 255)', 'rgb(255, 255, 255)'],
       ['dark', 'rgb(42, 42, 42)', 'rgb(31, 31, 31)']

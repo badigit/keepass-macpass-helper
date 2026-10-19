@@ -16,18 +16,6 @@
     </header>
 
     <div class="field">
-      <div class="field-head">
-        <label for="f-url" data-i18n="save_field_url">URL</label>
-        <div class="segmented" role="radiogroup">
-          <button type="button" data-cmd="url-mode" data-mode="full" class="active" data-i18n="save_url_full" data-i18n-title="save_url_full_hint">Full</button>
-          <button type="button" data-cmd="url-mode" data-mode="origin" data-i18n="save_url_origin" data-i18n-title="save_url_origin_hint">Site</button>
-          <button type="button" data-cmd="url-mode" data-mode="domain" data-i18n="save_url_domain" data-i18n-title="save_url_domain_hint">Domain</button>
-        </div>
-      </div>
-      <input id="f-url" type="text" name="url" spellcheck="false">
-    </div>
-
-    <div class="field">
       <label for="f-login" data-i18n="save_field_login">Login</label>
       <input id="f-login" type="text" name="login" autocomplete="off" spellcheck="false" required>
     </div>
@@ -69,6 +57,18 @@
         <label><span data-i18n="save_gen_symbols">Symbols</span><input type="number" name="cs-len2" min="0" max="16" value="3"></label>
       </div>
     </section>
+
+    <div class="field">
+      <div class="field-head">
+        <label for="f-url" data-i18n="save_field_url">URL</label>
+        <div class="segmented" role="radiogroup">
+          <button type="button" data-cmd="url-mode" data-mode="full" class="active" data-i18n="save_url_full" data-i18n-title="save_url_full_hint">Full</button>
+          <button type="button" data-cmd="url-mode" data-mode="origin" data-i18n="save_url_origin" data-i18n-title="save_url_origin_hint">Site</button>
+          <button type="button" data-cmd="url-mode" data-mode="domain" data-i18n="save_url_domain" data-i18n-title="save_url_domain_hint">Domain</button>
+        </div>
+      </div>
+      <input id="f-url" type="text" name="url" spellcheck="false">
+    </div>
 
     <div class="field">
       <label for="f-notes" data-i18n="save_field_notes">Notes</label>

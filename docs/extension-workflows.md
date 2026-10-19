@@ -13,6 +13,10 @@ the final payload only while it remains the latest request for that tab.
 clears the previous request, waits for the final data and preserves individual
 fields edited by the user. Empty pending data never triggers password generation.
 Form scraping keeps each password inside its corresponding form.
+`form-context.js:readLoginFromForm` reads a filled login for both inline actions
+and menu/keyboard scraping. It preserves case, includes the initiating login field,
+skips empty/hidden/OTP candidates and stays inside the selected form. The panel
+orders its main fields as Login, Password, URL.
 
 `KeePass.set` rejects responses without an explicit successful `Success` value.
 This covers the save panel, passkey writes and UUID site linking, including direct

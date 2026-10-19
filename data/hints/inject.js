@@ -13,7 +13,6 @@
   const {
     normalizeLogin,
     createFormStateStore,
-    formContextRoot,
     rememberLoginForField: rememberLoginForFieldImpl,
     sortedEntriesForField: sortedEntriesForFieldImpl
   } = self.__kpFormContext;
@@ -306,20 +305,7 @@
 
   /* ---- Create a new entry from the page ---- */
 
-  // inferLoginFromForm() lowercases for matching; a stored entry deserves the
-  // value exactly as it was typed, so read the field directly here.
-  const pageLogin = el => {
-    const node = formContextRoot(el);
-    if (!node) return '';
-    const inputs = [...(node.querySelectorAll?.('input') || [])]
-      .filter(input => input !== el && input.offsetParent);
-    const field = inputs.find(input => {
-      const type = (input.type || '').toLowerCase();
-      if (type && type !== 'text' && type !== 'email' && type !== 'tel') return false;
-      return isLoginField(input) && !isPasswordField(input) && !isOTPField(input);
-    });
-    return (field?.value || '').trim();
-  };
+  const pageLogin = self.__kpFormContext.readLoginFromForm;
 
   // Opens the save form for the current page. On a registration form the
   // password field is still empty, so the worker mints one, types it into the

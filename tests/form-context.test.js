@@ -27,7 +27,7 @@ function makeInput(attrs = {}) {
     get offsetParent() { return a.offsetParent; },
     get className() { return ''; },
     parentElement: null,
-    getAttribute() { return null; },
+    getAttribute(name) { return a[name] ?? null; },
     getRootNode() { return null; },
     closest(sel) { return sel === 'form' ? a.form : null; },
     _attrs: a
@@ -122,4 +122,29 @@ test('normalizeLogin — trim, lowercase, null-safe', () => {
   assert.equal(fc.normalizeLogin('  Foo '), 'foo');
   assert.equal(fc.normalizeLogin(null), '');
   assert.equal(fc.normalizeLogin(undefined), '');
+});
+
+test('saving reads the active login field and preserves its case', {timeout: 2000}, () => {
+  const user = makeInput({name: 'username', value: '  CaseSensitive.User  '});
+  makeForm([user]);
+  assert.equal(fc.readLoginFromForm(user), 'CaseSensitive.User');
+});
+
+test('saving from password picks a filled login in the same form', {timeout: 2000}, () => {
+  const empty = makeInput({name: 'username'});
+  const user = makeInput({name: 'email', type: 'email', value: 'MixedCase@example.test'});
+  const password = makeInput({type: 'password', value: 'not-a-login'});
+  makeForm([empty, user, password]);
+  const other = makeInput({name: 'username', value: 'wrong-form'});
+  makeForm([other]);
+  assert.equal(fc.readLoginFromForm(password), 'MixedCase@example.test');
+});
+
+test('saving skips hidden and OTP fields and accepts a telephone login', {timeout: 2000}, () => {
+  const hidden = makeInput({name: 'username', value: 'hidden-user', offsetParent: null});
+  const otp = makeInput({name: 'otp', value: '123456'});
+  const phone = makeInput({name: 'phone', type: 'tel', autocomplete: 'username', value: '+1234567890'});
+  const password = makeInput({type: 'password'});
+  makeForm([hidden, otp, phone, password]);
+  assert.equal(fc.readLoginFromForm(password), '+1234567890');
 });

@@ -22,6 +22,19 @@
 
   const normalizeLogin = value => String(value || '').trim().toLowerCase();
 
+  // Saving preserves the entered case; matching normalizes this value separately.
+  const readLoginFromForm = (el, node = formContextRoot(el)) => {
+    if (!node) return '';
+    const inputs = [el, ...(node.extendedQuerySelectorAll?.('input') || node.querySelectorAll?.('input') || [])];
+    const candidates = inputs.filter(input => input?.offsetParent &&
+      TEXT_LIKE_TYPES.has((input.type || '').toLowerCase()) &&
+      h.isLoginField(input) && !h.isPasswordField(input) && !h.isOTPField(input) &&
+      String(input.value || '').trim());
+    const field = candidates.find(input => input === el) ||
+      candidates.find(input => /\busername\b/i.test(input.getAttribute?.('autocomplete') || '')) || candidates[0];
+    return String(field?.value || '').trim();
+  };
+
   /* Find the smallest ancestor that holds either a password input or a
    * text-like input — i.e. the actual form regardless of <form> markup. Stops
    * at document.body and crosses one shadow boundary when walking up. */
@@ -81,15 +94,7 @@
 
     const node = formContextRoot(el);
     if (!node) return '';
-    const inputs = [...(node.querySelectorAll?.('input') || [])]
-      .filter(input => input !== el && input.offsetParent);
-    const userField = inputs.find(input => {
-      const type = (input.type || '').toLowerCase();
-      if (!TEXT_LIKE_TYPES.has(type)) return false;
-      return h.isLoginField(input) && !h.isPasswordField(input) && !h.isOTPField(input);
-    });
-
-    const value = normalizeLogin(userField?.value);
+    const value = normalizeLogin(readLoginFromForm(el, node));
     if (value) {
       state.preferredLogin = value;
       return value;
@@ -120,6 +125,7 @@
 
   return {
     normalizeLogin,
+    readLoginFromForm,
     formContextRoot,
     createFormStateStore,
     rememberLoginForField,
