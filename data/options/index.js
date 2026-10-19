@@ -66,14 +66,19 @@ document.getElementById('keepassxc').addEventListener('change', e => {
   }
 });
 
-function restore() {
+async function restore() {
+  const generator = await self.__kpPasswordPrefs.load(chrome.storage.local);
+  document.getElementById('generator-mode').value = generator.mode;
+  for (const [id, name] of [['dw-count', 'wordCount'], ['dw-sep', 'separator'], ['dw-digits', 'appendDigits'], ['dw-symbols', 'appendSymbols']]) {
+    document.getElementById(id).value = generator.diceware[name];
+  }
+  document.getElementById('dw-cap').checked = generator.diceware.capitalize;
+  for (const [id, name] of [['charset-1', 'charset1'], ['charset-2', 'charset2'], ['length-1', 'length1'], ['length-2', 'length2']]) {
+    document.getElementById(id).value = generator.charset[name];
+  }
   chrome.storage.local.get({
     'host': 'http://localhost:19455',
-    'foramt': '[login] - [name]',
-    'charset-1': 'qwertyuioplkjhgfdsazxcvbnmQWERTYUIOPLKJHGFDSAZXCVBNM1234567890',
-    'charset-2': '!@#$%^&*()-_+=',
-    'length-1': 10,
-    'length-2': 2,
+    'format': '[login] - [name]',
     'auto-login': false,
     'auto-submit': true,
     'faqs': true,
@@ -97,12 +102,7 @@ function restore() {
     document.getElementById('save-dialog-style').value = localStorage.getItem('save-dialog-style') || '';
     document.getElementById('host').value = prefs.host;
     document.getElementById('format').value = prefs.format;
-    document.getElementById('charset-1').value = prefs['charset-1'];
-    document.getElementById('length-1').value = prefs['length-1'];
-    document.getElementById('charset-2').value = prefs['charset-2'];
-    document.getElementById('length-2').value = prefs['length-2'];
     document.getElementById('auto-login').checked = prefs['auto-login'];
-    document.getElementById('auto-submit-auto-login').checked = localStorage.getItem('auto-submit') === 'true';
     document.getElementById('auto-submit').checked = prefs['auto-submit'];
     document.getElementById('faqs').checked = prefs.faqs;
     document.getElementById('xc-native-id').value = prefs['xc-native-id'];
@@ -140,10 +140,22 @@ async function save() {
     'keys': ps.keys,
     'host': document.getElementById('host').value,
     'format': document.getElementById('format').value,
-    'charset-1': document.getElementById('charset-1').value,
-    'length-1': Math.max(document.getElementById('length-1').value, 3),
-    'charset-2': document.getElementById('charset-2').value,
-    'length-2': Math.max(document.getElementById('length-2').value, 0),
+    [self.__kpPasswordPrefs.key]: self.__kpPasswordPrefs.normalize({
+      mode: document.getElementById('generator-mode').value,
+      diceware: {
+        wordCount: document.getElementById('dw-count').value,
+        separator: document.getElementById('dw-sep').value,
+        capitalize: document.getElementById('dw-cap').checked,
+        appendDigits: document.getElementById('dw-digits').value,
+        appendSymbols: document.getElementById('dw-symbols').value
+      },
+      charset: {
+        charset1: document.getElementById('charset-1').value,
+        charset2: document.getElementById('charset-2').value,
+        length1: document.getElementById('length-1').value,
+        length2: document.getElementById('length-2').value
+      }
+    }),
     'auto-login': document.getElementById('auto-login').checked,
     'auto-submit': document.getElementById('auto-submit').checked,
     'faqs': document.getElementById('faqs').checked,
@@ -161,12 +173,6 @@ async function save() {
 
 document.addEventListener('DOMContentLoaded', restore);
 document.getElementById('save').addEventListener('click', save);
-document.getElementById('example').addEventListener('click', () => {
-  document.getElementById('json').value = JSON.stringify([{
-    'url': 'https://github.com/login',
-    'username': 'test.user@gmail.com'
-  }], null, '  ');
-});
 document.getElementById('support').addEventListener('click', () => chrome.tabs.create({
   url: 'https://www.paypal.me/addondonation/10usd'
 }));
@@ -200,13 +206,6 @@ document.getElementById('check').addEventListener('click', () => {
     toast(e.message);
   }
 });
-
-document.getElementById('all-frames').classList.add('hidden');
-// hide granted permissions
-chrome.permissions.contains({
-  permissions: ['webNavigation'],
-  origins: ['<all_urls>']
-}, granted => granted && document.getElementById('permission').classList.add('hidden'));
 
 const kwpass = new KWPASS();
 
@@ -342,9 +341,9 @@ document.getElementById('ssdb-import').addEventListener('click', () => {
       reader.onloadend = event => {
         input.remove();
         const prefs = JSON.parse(event.target.result);
-        chrome.storage.sync.set(prefs, () => {
+        chrome.storage.sync.set(prefs).then(() => {
           toast('Synced credentials are imported');
-        });
+        }).catch(error => toast('Import failed: ' + error.message));
       };
       reader.readAsText(file, 'utf-8');
     }
@@ -353,9 +352,9 @@ document.getElementById('ssdb-import').addEventListener('click', () => {
 });
 document.getElementById('ssdb-clear').onclick = () => {
   if (confirm(`Are you are you want to remove all credentials in the browser's synced storage?`)) {
-    chrome.storage.sync.clear(() => {
+    chrome.storage.sync.clear().then(() => {
       toast('Your passwords in the synced storage are permanently removed');
-    });
+    }).catch(error => toast('Clear failed: ' + error.message));
   }
 };
 

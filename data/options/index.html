@@ -29,14 +29,21 @@
   </div>
   <h2 class="heading">Password Generation</h2>
   <div class="m1">
+    <label for="generator-mode">Mode (shared with save panel and shortcuts)</label>
+    <select id="generator-mode"><option value="diceware">Words</option><option value="charset">Characters</option></select>
+    <label for="dw-count">Words</label><input id="dw-count" type="number" min="3" max="12">
+    <label for="dw-sep">Separator</label><input id="dw-sep" type="text" maxlength="3">
+    <label for="dw-cap">Capitalize words</label><input id="dw-cap" type="checkbox">
+    <label for="dw-digits">Trailing digits</label><input id="dw-digits" type="number" min="0" max="6">
+    <label for="dw-symbols">Trailing symbols</label><input id="dw-symbols" type="number" min="0" max="6">
     <label for="charset-1">Characters (1)</label>
     <input type="text" id="charset-1">
     <label for="length-1">Length (1)</label>
-    <input type="number" id="length-1" min=3>
+    <input type="number" id="length-1" min="0" max="64">
     <label for="charset-2">Characters (2)</label>
     <input type="text" id="charset-2">
     <label for="length-2">Length (2)</label>
-    <input type="number" id="length-2" min=0>
+    <input type="number" id="length-2" min="0" max="16">
   </div>
   <h2 class="heading">Sorting</h2>
   <div class="om">
@@ -60,13 +67,6 @@
     <input type="checkbox" id="auto-login">
     <label for="auto-submit">Then submit the form</label>
     <input type="checkbox" id="auto-submit">
-  </div>
-  <h2 class="heading">Auto Login (not available)</h2>
-  <p class="disabled">A JSON array to fill login forms automatically without the need to use the panel at all. <a href="#" id=example>Insert an example</a></p>
-  <textarea rows="4" id="json" disabled></textarea>
-  <div class="om">
-      <label for="auto-submit-auto-login">Then submit the form</label>
-      <input type="checkbox" id="auto-submit-auto-login">
   </div>
   <h2 class="heading">Panel (popup) Styling</h2>
   <textarea rows="4" id="cmd-style" placeholder="style panel with CSS; e.g.: body {background: #fff !important;}"></textarea>
@@ -182,7 +182,6 @@
   </div>
 
   <p class="fl">
-    <button id="all-frames" title="Grant permissions needed for accessing cross-origin iframe elements in the active tab. This is useful if a login dialog is not on the same origin as the website itself (e.g.: https://www.aliexpress.com/)">Access Remote Frames Permission</button>
     <button id="usage">YouTube Preview</button>
     <button id="rate">Rate Me</button>
   </p>
@@ -196,6 +195,7 @@
 <script src="/connect/kdbxweb/kdbxweb.js"></script>
 <script src="/tools/tld.js"></script>
 <script src="/connect/kdbxweb/connect.js"></script>
+<script src="/tools/password-prefs.js"></script>
 <script src="index.js"></script>
 </body>
 </html>

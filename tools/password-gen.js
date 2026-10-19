@@ -96,5 +96,6 @@
     return out;
   };
 
-  return {randomIndex, charset, diceware};
+  const generate = prefs => prefs.mode === 'charset' ? charset(prefs.charset) : diceware(prefs.diceware);
+  return {randomIndex, charset, diceware, generate};
 });

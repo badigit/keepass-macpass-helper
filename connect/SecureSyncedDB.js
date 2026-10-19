@@ -2,21 +2,21 @@
 
 class SyncedStorage {
   get(key) {
-    return new Promise(resolve => chrome.storage.sync.get(key, prefs => resolve(prefs[key])));
+    return chrome.storage.sync.get(key).then(prefs => prefs[key]);
   }
   set(key, value) {
     if (key === '') {
       return Promise.reject(Error('EMPTY_KEY'));
     }
-    return new Promise(resolve => chrome.storage.sync.set({
+    return chrome.storage.sync.set({
       [key]: value
-    }, resolve));
+    });
   }
   remove(key) {
-    return new Promise(resolve => chrome.storage.sync.remove(key, resolve));
+    return chrome.storage.sync.remove(key);
   }
   clear() {
-    return new Promise(resolve => chrome.storage.sync.clear(resolve));
+    return chrome.storage.sync.clear();
   }
 }
 

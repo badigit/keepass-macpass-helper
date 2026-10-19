@@ -256,7 +256,12 @@ class KeePass extends SimpleStorage {
       'Group': group,
       'Uuid': uuid,
       'OnlyIfUrlEmpty': onlyIfUrlEmpty === true
-    }, undefined, true, ['Login', 'Password', 'Url', 'SubmitUrl', 'Name', 'Notes', 'Group', 'Uuid']);
+    }, undefined, true, ['Login', 'Password', 'Url', 'SubmitUrl', 'Name', 'Notes', 'Group', 'Uuid']).then(result => {
+      if (result?.Success !== true && result?.Success !== 'true') {
+        throw Error(result?.Error || 'KeePassHTTP did not confirm saving the entry');
+      }
+      return result;
+    });
   }
   // high-level access
   async search(query) {

@@ -46,24 +46,25 @@ class Safe {
       iv
     }, this.#key, this.#encoder.encode(string));
 
-    return new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.readAsDataURL(new Blob([iv, result], {type: 'text/enc'}));
-    });
+    // Preserve the existing IV + ciphertext format without DOM-only FileReader.
+    const bytes = new Uint8Array(iv.length + result.byteLength);
+    bytes.set(iv);
+    bytes.set(new Uint8Array(result), iv.length);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
   }
   async decrypt(string) {
     // compatibility fix
     string = string.replace('data:application/octet-binary;base64,', '');
 
-    const iv = crypto.getRandomValues(new Uint8Array(16));
+    const bytes = this.#buffer(atob(string));
+    const iv = bytes.subarray(0, 16);
 
     const result = await crypto.subtle.decrypt({
       name: 'AES-CBC',
       iv
-    }, this.#key, this.#buffer(atob(string)));
-
-    const ab = (new Uint8Array(result)).subarray(16);
-    return this.#decoder.decode(ab);
+    }, this.#key, bytes.subarray(16));
+    return this.#decoder.decode(result);
   }
 }

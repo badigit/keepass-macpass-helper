@@ -1,91 +1,117 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const vm = require('node:vm');
+const {worker, panel, storage, flush} = require('./helpers/extension.js');
+const deferred = () => { let resolve; const promise = new Promise(done => {resolve = done;}); return {promise, resolve}; };
+const timeout = {timeout: 3000};
 
-const worker = fs.readFileSync(path.join(__dirname, '../worker.js'), 'utf8');
-const opener = worker.slice(worker.indexOf('const openSaveForm ='), worker.indexOf('// Generates a password'));
-const branch = worker.slice(worker.indexOf("else if (request.cmd === 'hints-save-form')"),
-  worker.indexOf("else if (request.cmd === 'hints-report-unwanted')"));
-
-function setup({generate = false, rejectOpen = false} = {}) {
-  const calls = [];
-  let gesture = true;
-  let respond;
-  const response = new Promise(resolve => { respond = resolve; });
-  const field = {tagName: 'INPUT', type: 'password', value: '', isConnected: true};
-  const document = {activeElement: {tagName: 'BODY'}};
-  field.ownerDocument = document;
-  const context = {
-    Promise, document, console: {warn() {}},
-    __kpHintsActiveField: field,
-    __kpHintsField: require('../tools/hints-field.js'),
-    setInputValue: (target, value) => { target.value = value; },
-    generatePassword: async () => { calls.push('generate'); return 'fixture-password'; },
-    chrome: {
-      storage: {session: {set: async payload => {
-        calls.push(['storage', payload]);
-        queueMicrotask(() => { gesture = false; });
-      }}},
-      sidePanel: {
-        setOptions: async options => { calls.push(['options', options]); },
-        open: options => {
-          calls.push(['open', options]);
-          assert.equal(gesture, true, 'panel must open before the first async boundary');
-          return rejectOpen ? Promise.reject(new Error('panel refused')) : Promise.resolve();
-        }
-      },
-      windows: {create: () => { assert.fail('saving must never open a popup'); }},
-      scripting: {executeScript: async options => {
-        calls.push(['script', options]);
-        if (options.func) vm.runInContext('(' + options.func.toString() + ')("fixture-password")', context);
-      }}
-    }
-  };
-  context.self = context;
-  vm.createContext(context);
-  vm.runInContext(opener + '\nconst handler = (request, sender, response) => { if (false) {} ' + branch + '};\n' +
-    'self.handle = handler;', context);
-  assert.equal(context.handle({cmd: 'hints-save-form', url: 'https://example.test/register',
-    login: 'fixture-user', password: generate ? '' : 'existing-password', generate},
-  {tab: {id: 42, url: 'https://example.test/register'}, frameId: 7}, respond), true);
-  return {calls, response, field};
+for (const entry of ['inline', 'menu', 'shortcut']) {
+  test(entry + ' opens panel before awaiting and publishes pending then final data', timeout, async () => {
+    const script = deferred();
+    let gestured = true;
+    const w = worker({open: () => {assert.equal(gestured, true); return Promise.resolve();}, executeScript: () => script.promise});
+    const seed = w.chrome.storage.session.set;
+    w.chrome.storage.session.set = value => {queueMicrotask(() => {gestured = false;}); return seed(value);};
+    let done;
+    if (entry === 'inline') done = w.message({cmd: 'hints-save-form', password: 'existing', login: 'fixture-user'});
+    else if (entry === 'menu') done = w.chrome.contextMenus.onClicked.fire({menuItemId: 'save-form'}, w.activeTab);
+    else done = w.chrome.commands.onCommand.fire('save-form', w.activeTab);
+    await flush();
+    assert.equal(w.calls.filter(call => call[0] === 'open').length, 1);
+    if (entry !== 'inline') assert.equal(w.chrome.storage.session.values['kp-save-form:42'].pending, true);
+    script.resolve([{result: [{usernames: ['fixture-user'], passwords: ['existing']}]}]);
+    await done;
+    const payload = w.chrome.storage.session.values['kp-save-form:42'];
+    assert.equal(payload.pending, false);
+    assert.equal(payload.pairs[0].passwords[0], 'existing');
+    assert.equal(w.calls.filter(call => call[0] === 'window').length, 0);
+  });
 }
-
-test('inline save opens the side panel before storage completes', {timeout: 2000}, async () => {
-  const {calls, response} = setup();
-  assert.equal((await response).ok, true);
-  assert.equal(calls[1][0], 'options');
-  assert.equal(calls[2][0], 'open');
-  assert.equal(calls[2][1].tabId, 42);
-  const payload = calls.filter(call => call[0] === 'storage').at(-1)[1]['kp-save-form:42'];
-  assert.equal(payload.pairs[0].passwords[0], 'existing-password');
-});
-
-test('generated password fills the original frame field after panel focus changes', {timeout: 2000}, async () => {
-  const {calls, response, field} = setup({generate: true});
-  assert.equal((await response).ok, true);
-  assert.ok(calls.findIndex(call => call[0] === 'open') < calls.indexOf('generate'));
+test('generated inline password fills the preserved field in the sender frame', timeout, async () => {
+  const page = {document: {activeElement: {tagName: 'BODY'}}};
+  const field = {tagName: 'INPUT', type: 'password', ownerDocument: page.document, isConnected: true};
+  page.self = page;
+  page.__kpHintsActiveField = field;
+  page.__kpHintsField = require('../tools/hints-field.js');
+  page.setInputValue = (element, value) => {element.value = value;};
+  const w = worker({executeScript: async options => {
+    assert.equal(options.target.frameIds[0], 7);
+    if (options.func) vm.runInNewContext('(' + options.func + ')(' + JSON.stringify(options.args[0]) + ')', page);
+    return [];
+  }});
+  w.context.__kpPasswordGen.generate = () => 'fixture-password';
+  assert.equal((await w.message({cmd: 'hints-save-form', generate: true})).ok, true);
   assert.equal(field.value, 'fixture-password');
-  const scripts = calls.filter(call => call[0] === 'script');
-  assert.equal(scripts[0][1].target.frameIds[0], 7);
-  assert.ok(scripts[0][1].files.includes('/tools/hints-field.js'));
-  const payload = calls.filter(call => call[0] === 'storage').at(-1)[1]['kp-save-form:42'];
-  assert.equal(payload.pairs[0].passwords[0], field.value);
+  assert.equal(w.chrome.storage.session.values['kp-save-form:42'].pairs[0].passwords[0], field.value);
 });
-
-test('panel refusal reports failure without creating a popup or generating a password', {timeout: 2000}, async () => {
-  const {calls, response} = setup({generate: true, rejectOpen: true});
-  const result = await response;
-  assert.equal(result.ok, false);
+test('panel failure is explicit and never generates or opens a popup', timeout, async () => {
+  const w = worker({open: () => Promise.reject(Error('panel refused'))});
+  w.context.__kpPasswordGen.generate = () => assert.fail('must not generate');
+  const result = await w.message({cmd: 'hints-save-form', generate: true});
   assert.equal(result.error, 'panel refused');
-  assert.ok(!calls.includes('generate'));
+  assert.equal(w.chrome.storage.session.values['kp-save-form:42'].error, 'panel refused');
+  assert.ok(!w.calls.some(call => call[0] === 'window'));
+});
+test('late completion of an older save cannot overwrite the newer one', timeout, async () => {
+  const first = deferred();
+  const w = worker({executeScript: () => first.promise});
+  const old = w.chrome.contextMenus.onClicked.fire({menuItemId: 'save-form'}, w.activeTab);
+  await flush();
+  await w.message({cmd: 'hints-save-form', login: 'new-user', password: 'new-password'});
+  first.resolve([{result: [{usernames: ['old-user'], passwords: ['old-password']}]}]);
+  await old;
+  assert.equal(w.chrome.storage.session.values['kp-save-form:42'].pairs[0].usernames[0], 'new-user');
+});
+test('panel waits for ready data, handles repeats and ignores stale snapshots', timeout, async () => {
+  const store = storage();
+  let generations = 0;
+  const p = panel({storage: store}, {generate: () => {generations++; return 'generated';}});
+  await flush();
+  const put = payload => store.session.set({'kp-save-form:42': payload});
+  await put({revision: 1, pending: true, url: 'https://example.test'});
+  assert.equal(generations, 0);
+  assert.equal(p.field('[data-cmd=save]').disabled, true);
+  await put({revision: 1, pairs: [{usernames: ['first'], passwords: ['actual']}], url: 'https://example.test'});
+  assert.equal(p.field('[name=password]').value, 'actual');
+  await put({revision: 2, pending: true, url: 'https://example.test/other'});
+  assert.equal(p.field('[name=password]').value, '');
+  p.input('login', 'typed-user');
+  await put({revision: 2, pairs: [{usernames: ['scraped'], passwords: ['second']}], url: 'https://example.test/other'});
+  assert.equal(p.field('[name=login]').value, 'typed-user');
+  assert.equal(p.field('[name=password]').value, 'second');
+  await put({revision: 1, pairs: [{usernames: ['stale'], passwords: ['stale']}]});
+  assert.equal(p.field('[name=password]').value, 'second');
+  assert.equal(generations, 0);
+});
+test('empty final form generates once, preserves empty edits and applies CSS', timeout, async () => {
+  const store = storage();
+  let generations = 0;
+  const p = panel({storage: store}, {style: 'body {color: red}', generate: () => {generations++; return 'generated';}});
+  await flush();
+  const put = payload => store.session.set({'kp-save-form:42': payload});
+  await put({revision: 1, pending: true});
+  await put({revision: 1, pairs: []});
+  await put({revision: 1, pairs: []});
+  assert.equal(generations, 1);
+  assert.equal(p.styles[0].textContent, 'body {color: red}');
+  await put({revision: 2, pending: true});
+  p.input('password', '');
+  await put({revision: 2, pairs: [{usernames: ['fixture'], passwords: ['scraped']}]});
+  assert.equal(p.field('[name=password]').value, '');
+  assert.equal(generations, 1);
 });
 
-test('pending payload does not render or generate a second password', {timeout: 2000}, () => {
-  const save = fs.readFileSync(path.join(__dirname, '../data/save/index.js'), 'utf8');
-  const render = save.slice(save.indexOf('const renderPayload ='), save.indexOf('const loadPayload ='));
-  const context = {q: () => assert.fail('pending payload must wait before touching fields')};
-  vm.runInNewContext(render + '\nrenderPayload({pending: true});', context);
+test('menu scraping keeps usernames and passwords inside the same form', timeout, async () => {
+  const forms = ['first', 'second'].map(name => ({
+    extendedQuerySelectorAll: selector => selector.includes('password') ? [{value: name + '-password'}] :
+      selector.includes('email') ? [] : [{value: name + '-user'}]
+  }));
+  const passwords = forms.map(form => ({form, value: 'unused-page-password'}));
+  const page = {document: {extendedQuerySelectorAll: () => passwords}, detectForm: field => field.form};
+  page.self = page;
+  const w = worker({executeScript: async options => options.func ?
+    [{result: vm.runInNewContext('(' + options.func + ')()', page)}] : []});
+  await w.chrome.contextMenus.onClicked.fire({menuItemId: 'save-form'}, w.activeTab);
+  const pairs = w.chrome.storage.session.values['kp-save-form:42'].pairs;
+  assert.deepEqual(pairs.map(pair => pair.passwords), [['first-password'], ['second-password']]);
 });

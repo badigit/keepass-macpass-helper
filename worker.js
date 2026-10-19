@@ -24,7 +24,9 @@ importScripts(
   '/data/hints/heuristics.js',
   // Password generators (charset + diceware). Exposes self.__kpPasswordGen.
   '/tools/diceware-words.js',
-  '/tools/password-gen.js'
+  '/tools/password-gen.js',
+  '/tools/password-prefs.js',
+  '/tools/safe.js'
 );
 
 const {searchWithUrlFallback, isLookupCandidate, linkOrigin} = self.__kpUrlLookup;
@@ -217,49 +219,67 @@ const copy = async (content, tab, frameId) => {
   }
 };
 copy.interface = async content => {
-  const win = await chrome.windows.getCurrent();
-  chrome.windows.create({
-    url: '/data/copy/index.html?content=' + encodeURIComponent(content),
-    width: 400,
-    height: 300,
-    left: win.left + Math.round((win.width - 400) / 2),
-    top: win.top + Math.round((win.height - 300) / 2),
-    type: 'popup'
-  });
+  if (typeof content !== 'string') throw Error('Clipboard content must be text');
+  const id = crypto.randomUUID();
+  const key = 'kp-copy:' + id;
+  await chrome.storage.session.set({[key]: {content, expires: Date.now() + 120000}});
+  try {
+    const win = await chrome.windows.getCurrent();
+    await chrome.windows.create({
+      url: '/data/copy/index.html?id=' + id,
+      width: 400,
+      height: 300,
+      left: win.left + Math.round((win.width - 400) / 2),
+      top: win.top + Math.round((win.height - 300) / 2),
+      type: 'popup'
+    });
+  }
+  catch (e) {
+    await chrome.storage.session.remove(key);
+    throw e;
+  }
 };
+chrome.storage.session.get(null).then(entries => {
+  const expired = Object.keys(entries).filter(key => key.startsWith('kp-copy:') && entries[key].expires < Date.now());
+  return chrome.storage.session.remove(expired);
+}).catch(e => console.warn('Clipboard cleanup:', e));
 
 // Call from the click/message handler before any await preserves user activation.
-const openSaveForm = tab => {
+const saveRequests = new Map();
+let saveRevision = Date.now();
+const openSaveForm = async (tab, prepare) => {
+  const requestId = crypto.randomUUID();
+  const revision = saveRevision = Math.max(saveRevision + 1, Date.now());
+  saveRequests.set(tab.id, requestId);
+  const key = 'kp-save-form:' + tab.id;
   const path = '/data/save/index.html?tab=' + tab.id;
-  const configured = chrome.sidePanel.setOptions({tabId: tab.id, path, enabled: true});
-  const opened = chrome.sidePanel.open({tabId: tab.id});
-  return Promise.all([configured, opened]);
+  try {
+    const seeded = chrome.storage.session.set({[key]: {requestId, revision, pending: true, url: tab.url}});
+    const configured = chrome.sidePanel.setOptions({tabId: tab.id, path, enabled: true});
+    const opened = chrome.sidePanel.open({tabId: tab.id});
+    await Promise.all([seeded, configured, opened]);
+    const payload = await prepare();
+    if (saveRequests.get(tab.id) === requestId) {
+      await chrome.storage.session.set({[key]: {...payload, requestId, revision, pending: false}});
+    }
+  }
+  catch (e) {
+    if (saveRequests.get(tab.id) === requestId) {
+      await chrome.storage.session.set({[key]: {requestId, revision, error: e.message, url: tab.url}});
+    }
+    throw e;
+  }
 };
 
 // Generates a password with the same preferences the save form stores, so the
 // value typed into the page matches what the form would have produced.
 const generatePassword = async () => {
-  const key = 'kp-password-generator-prefs';
-  const prefs = (await chrome.storage.local.get({[key]: null}))[key];
-  const mode = prefs && prefs.mode === 'charset' ? 'charset' : 'diceware';
-  if (mode === 'charset') {
-    const c = (prefs && prefs.charset) || {};
-    return self.__kpPasswordGen.charset({
-      length1: c.length1 ?? 14,
-      length2: c.length2 ?? 3
-    });
-  }
-  const d = (prefs && prefs.diceware) || {};
-  return self.__kpPasswordGen.diceware({
-    wordCount: d.wordCount ?? 5,
-    separator: d.separator ?? '-',
-    capitalize: d.capitalize !== false,
-    appendDigits: d.appendDigits ?? 1,
-    appendSymbols: d.appendSymbols ?? 1
-  });
+  const prefs = await self.__kpPasswordPrefs.load(chrome.storage.local);
+  return self.__kpPasswordGen.generate(prefs);
 };
 
 // messaging
+const clipboardReads = new Set();
 chrome.runtime.onMessage.addListener((request, sender, response) => {
   if (request.cmd === 'close-me') {
     chrome.scripting.executeScript({
@@ -285,7 +305,31 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
     notify(undefined, request.message, request.badge, request.color);
   }
   else if (request.cmd === 'copy-interface') {
-    copy.interface(request.password);
+    copy.interface(request.password).then(() => response({ok: true})).catch(e => response({ok: false, error: e.message}));
+    return true;
+  }
+  else if (request.cmd === 'copy-payload') {
+    (async () => {
+      const source = new URL(sender.url || 'about:blank');
+      const expected = new URL(chrome.runtime.getURL('/data/copy/index.html'));
+      if (source.protocol !== expected.protocol || source.host !== expected.host || source.pathname !== expected.pathname ||
+          source.searchParams.get('id') !== request.id || !/^[\da-f-]{36}$/i.test(request.id || '')) {
+        throw Error('Invalid clipboard request');
+      }
+      const key = 'kp-copy:' + request.id;
+      if (clipboardReads.has(key)) throw Error('Clipboard request already being consumed');
+      clipboardReads.add(key);
+      try {
+        const payload = (await chrome.storage.session.get(key))[key];
+        await chrome.storage.session.remove(key);
+        if (!payload || payload.expires < Date.now()) throw Error('Clipboard request expired');
+        return {ok: true, content: payload.content};
+      }
+      finally {
+        clipboardReads.delete(key);
+      }
+    })().then(response).catch(e => response({ok: false, error: e.message}));
+    return true;
   }
   else if (request.cmd === 'native') {
     chrome.runtime.sendNativeMessage(request.id, request.request, response);
@@ -526,41 +570,35 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       if (!tab || !tab.id) {
         return {ok: false};
       }
-      const seeded = chrome.storage.session.set({
-        ['kp-save-form:' + tab.id]: {pending: true}
-      });
-      // Open while the content-script click still carries user activation.
-      await Promise.all([seeded, openSaveForm(tab)]);
-      const frameIds = [sender.frameId ?? 0];
-      let password = request.password || '';
-      // Registration case: the page password field is empty, so mint a value,
-      // type it into the page and hand the same one to the form.
-      if (!password && request.generate) {
-        password = await generatePassword();
-        await chrome.scripting.executeScript({
-          target: {tabId: tab.id, frameIds},
-          files: ['/data/helper.js', '/tools/hints-field.js']
-        });
-        await chrome.scripting.executeScript({
-          target: {tabId: tab.id, frameIds},
-          func: value => {
-            const field = self.__kpHintsField.takeHintField(self, document);
-            if (field && field.tagName === 'INPUT' && field.type === 'password') {
-              self.setInputValue(field, value);
-            }
-          },
-          args: [password]
-        });
-      }
-      await chrome.storage.session.set({
-        ['kp-save-form:' + tab.id]: {
+      await openSaveForm(tab, async () => {
+        const frameIds = [sender.frameId ?? 0];
+        let password = request.password || '';
+        // Type the generated registration password into its original page field.
+        if (!password && request.generate) {
+          password = await generatePassword();
+          await chrome.scripting.executeScript({
+            target: {tabId: tab.id, frameIds},
+            files: ['/data/helper.js', '/tools/hints-field.js']
+          });
+          await chrome.scripting.executeScript({
+            target: {tabId: tab.id, frameIds},
+            func: value => {
+              const field = self.__kpHintsField.takeHintField(self, document);
+              if (field && field.tagName === 'INPUT' && field.type === 'password') {
+                self.setInputValue(field, value);
+              }
+            },
+            args: [password]
+          });
+        }
+        return {
           url: request.url || tab.url,
           favicon: tab.favIconUrl,
           pairs: [{
             usernames: request.login ? [request.login] : [],
             passwords: password ? [password] : []
           }]
-        }
+        };
       });
       return {ok: true};
     })().then(response).catch(e => {
@@ -609,6 +647,7 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       return;
     }
     once.done = true;
+    chrome.contextMenus.remove('auto-login', () => chrome.runtime.lastError);
 
     chrome.contextMenus.create({
       id: 'generate-password',
@@ -629,12 +668,6 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       id: 'hints-report-missed',
       title: 'Report: hint should appear here',
       contexts: ['editable']
-    }, () => chrome.runtime.lastError);
-    chrome.contextMenus.create({
-      id: 'auto-login',
-      title: 'Perform auto-login for this URL',
-      contexts: ['action'],
-      enabled: false
     }, () => chrome.runtime.lastError);
     chrome.contextMenus.create({
       id: 'encrypt-data',
@@ -671,6 +704,7 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
 // empty form on tabs the user didn't trigger.
 chrome.sidePanel?.setOptions?.({enabled: false}).catch(() => {});
 chrome.tabs.onRemoved.addListener(tabId => {
+  saveRequests.delete(tabId);
   chrome.storage.session.remove('kp-save-form:' + tabId).catch(() => {});
 });
 
@@ -715,57 +749,32 @@ const onCommand = async (info, tab) => {
       return;
     }
     const target = {tabId: tab.id};
-    const sessionKey = 'kp-save-form:' + tab.id;
-
-    // sidePanel.open() must be called inside the same user-gesture turn — so
-    // BEFORE any await. The panel will read storage.session on load and also
-    // listen for changes; the heavy lifting (injecting helper, scraping form
-    // fields) happens after, asynchronously.
     try {
-      chrome.sidePanel.setOptions({
-        tabId: tab.id,
-        path: '/data/save/index.html?tab=' + tab.id,
-        enabled: true
+      await openSaveForm(tab, async () => {
+        await chrome.scripting.executeScript({
+          target: {...target, allFrames: true},
+          files: ['/data/helper.js']
+        });
+        const r = await chrome.scripting.executeScript({
+          target: {...target, allFrames: true},
+          func: () => {
+            const inputs = document.extendedQuerySelectorAll('input[type=password]');
+            const forms = inputs
+              .map(p => self.detectForm(p, 'input[type=text],input[type=email]'))
+              .filter((f, i, l) => f && l.indexOf(f) === i);
+            return forms.map(f => {
+              const usernames = [
+                ...f.extendedQuerySelectorAll('input[type=text]'),
+                ...f.extendedQuerySelectorAll('input[type=email]')
+              ].flat().map(e => e.value).filter(s => s);
+              const passwords = f.extendedQuerySelectorAll('input[type=password]').map(e => e.value).filter(s => s);
+              return {usernames, passwords};
+            });
+          }
+        });
+        const pairs = r.map(o => o.result).flat().filter(a => a);
+        return {pairs, url: tab.url, favicon: tab.favIconUrl};
       });
-      chrome.sidePanel.open({tabId: tab.id}).catch(e => console.warn('sidePanel.open:', e));
-    }
-    catch (e) {
-      console.warn('sidePanel setup:', e);
-    }
-
-    // Seed an empty payload so the side panel doesn't render with the URL of
-    // an earlier tab if storage happens to be stale.
-    chrome.storage.session.set({[sessionKey]: {pairs: [], url: tab.url, favicon: tab.favIconUrl}}).catch(() => {});
-
-    try {
-      await chrome.scripting.executeScript({
-        target: {...target, allFrames: true},
-        files: ['/data/helper.js']
-      });
-
-      // collect logins from all frames
-      const r = await chrome.scripting.executeScript({
-        target: {...target, allFrames: true},
-        func: () => {
-          const inputs = document.extendedQuerySelectorAll('input[type=password]');
-          const forms = inputs
-            .map(p => self.detectForm(p, 'input[type=text],input[type=email]'))
-            .filter((f, i, l) => f && l.indexOf(f) === i);
-
-          return forms.map(f => {
-            const usernames = [
-              ...f.extendedQuerySelectorAll('input[type=text]'),
-              ...f.extendedQuerySelectorAll('input[type=email]')
-            ].flat().map(e => e.value).filter(s => s);
-            const passwords = inputs.map(e => e.value).filter(s => s);
-            return {usernames, passwords};
-          });
-        }
-      });
-      const pairs = r.map(o => o.result).flat().filter(a => a);
-
-      // Push final payload; storage.onChanged in the panel re-renders.
-      await chrome.storage.session.set({[sessionKey]: {pairs, url: tab.url, favicon: tab.favIconUrl}});
     }
     catch (e) {
       console.warn(e);
@@ -803,63 +812,8 @@ const onCommand = async (info, tab) => {
     }
   }
   else if (info.menuItemId === 'generate-password') {
-    chrome.storage.local.get({
-      'charset-1': 'qwertyuioplkjhgfdsazxcvbnmQWERTYUIOPLKJHGFDSAZXCVBNM1234567890',
-      'charset-2': '!@#$%^&*()-_+=',
-      'length-1': 10,
-      'length-2': 2
-    }, prefs => {
-      const password = self.__kpPasswordGen.charset({
-        charset1: prefs['charset-1'],
-        charset2: prefs['charset-2'],
-        length1: prefs['length-1'],
-        length2: prefs['length-2']
-      });
-      copy(password, tab);
-    });
-  }
-  else if (info.menuItemId === 'auto-login') {
-    const {origin} = new URL(tab.url);
-    chrome.storage.local.get({
-      'json': []
-    }, async prefs => {
-      const o = prefs.json.filter(o => o.url.startsWith(origin)).shift();
-      try {
-        const r = await chrome.scripting.executeScript({
-          target: {
-            tabId: tab.id
-          },
-          func: (value = '') => {
-            return prompt(`What is the username to match with KeePass database?
-
-This username must exactly correspond to one of the credentials stored in your KeePass database for this URL.`, value);
-          },
-          args: [o?.username || '']
-        });
-        if (r[0].result) {
-          if (o) {
-            o.username = r[0].result;
-          }
-          else {
-            prefs.json.push({
-              url: origin,
-              username: r[0].result
-            });
-          }
-        }
-        else {
-          if (o) {
-            const n = prefs.json.indexOf(o);
-            prefs.json.splice(n, 1);
-          }
-        }
-        chrome.storage.local.set(prefs);
-      }
-      catch (e) {
-        console.warn(e);
-        notify(tab, e);
-      }
-    });
+    try { await copy(await generatePassword(), tab); }
+    catch (e) { notify(tab, e); }
   }
   else if (info.menuItemId === 'hints-open') {
     chrome.tabs.sendMessage(tab.id, {
@@ -899,9 +853,9 @@ This username must exactly correspond to one of the credentials stored in your K
   }
 };
 chrome.contextMenus.onClicked.addListener(onCommand);
-chrome.commands.onCommand.addListener(command => onCommand({
+chrome.commands.onCommand.addListener((command, tab) => onCommand({
   menuItemId: command
-}));
+}, tab));
 
 const icon = () => chrome.storage.session.get({
   'ssdb-exported-key': ''

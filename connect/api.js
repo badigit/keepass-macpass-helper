@@ -45,7 +45,7 @@ engine.hasSSDB = () => new Promise(resolve => chrome.storage.session.get({
   'ssdb-exported-key': ''
 }, prefs => resolve(!!prefs['ssdb-exported-key'])));
 
-engine.prepare = type => {
+engine.prepare = async type => {
   engine.type = type;
   engine.ssdb = undefined;
   if (type === 'keepass') {
@@ -80,25 +80,19 @@ engine.prepare = type => {
     };
   }
 
-  return new Promise(resolve => {
-    chrome.storage.session.get({
-      'ssdb-exported-key': ''
-    }, prefs => {
-      const exportedKey = prefs['ssdb-exported-key'];
-
-      if (exportedKey) {
-        engine.ssdb = new SecureSyncedStorage();
-        engine.ssdb.import(exportedKey).then(resolve).catch(e => {
-          console.warn('Unable to restore Secure Synced Storage key from session', e);
-          engine.ssdb = undefined;
-          chrome.storage.session.remove('ssdb-exported-key', resolve);
-        });
-      }
-      else {
-        resolve();
-      }
-    });
-  }).then(() => engine.core.prepare());
+  const prefs = await chrome.storage.session.get({'ssdb-exported-key': ''});
+  if (prefs['ssdb-exported-key']) {
+    try {
+      const ssdb = new SecureSyncedStorage();
+      await ssdb.import(prefs['ssdb-exported-key']);
+      engine.ssdb = ssdb;
+    }
+    catch (e) {
+      console.warn('Unable to restore Secure Synced Storage key from session', e);
+      await chrome.storage.session.remove('ssdb-exported-key');
+    }
+  }
+  await engine.core.prepare();
 };
 
 engine.search = async query => {
@@ -111,7 +105,10 @@ engine.search = async query => {
       for (const uuid of uuids) {
         const r = await engine.ssdb.find(uuid, undefined, (failed, succeeded, total) => {
           if (succeeded === 0 && total !== 0 && failed) {
-            document.getElementById('notify').notify('Unable to decrypt entries in secure storage. Incorrect password?', 'warning', 3000);
+            const message = 'Unable to decrypt entries in secure storage. Incorrect password?';
+            const notify = typeof document === 'undefined' ? null : document.getElementById('notify');
+            if (notify) notify.notify(message, 'warning', 3000);
+            else console.warn(message);
           }
           else if (failed) {
             console.info(

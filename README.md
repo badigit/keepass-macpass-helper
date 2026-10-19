@@ -25,3 +25,4 @@ Run `./build.sh` to create a `keepass-helper.zip` package from the repository ro
 
 - Hints heuristics and their motivating cases: [`docs/hints-heuristics.md`](docs/hints-heuristics.md)
 - Public-safe report triage flow for new hint cases: [`docs/hints-report-flow.md`](docs/hints-report-flow.md)
+- Shared save, clipboard and preference workflows: [`docs/extension-workflows.md`](docs/extension-workflows.md)

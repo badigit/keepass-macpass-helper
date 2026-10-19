@@ -3,22 +3,12 @@
 
 const args = new URLSearchParams(location.search);
 const sessionKey = 'kp-save-form:' + (args.get('tab') || '');
-const generatorPrefsKey = 'kp-password-generator-prefs';
+const {key: generatorPrefsKey, defaults: generatorDefaults} = self.__kpPasswordPrefs;
 const targetPrefsKey = 'kp-save-target';
-const generatorDefaults = {
-  mode: 'diceware',
-  diceware: {
-    wordCount: 5,
-    separator: '-',
-    capitalize: true,
-    appendDigits: 1,
-    appendSymbols: 1
-  },
-  charset: {
-    length1: 14,
-    length2: 3
-  }
-};
+let generatorPrefs = self.__kpPasswordPrefs.normalize();
+const payloadState = self.__kpSaveState.create();
+let payloadReady = false;
+let generatorReady = false;
 
 const t = (key, subs) => self.__kpI18n?.t(key, subs) || '';
 const q = sel => document.querySelector(sel);
@@ -86,7 +76,7 @@ const syncHost = () => {
 
 /* ---------- generator ---------- */
 
-const currentGeneratorPrefs = () => ({
+const currentGeneratorPrefs = () => self.__kpPasswordPrefs.normalize({
   mode: q('#gen-panel').dataset.mode || generatorDefaults.mode,
   diceware: {
     wordCount: numberValue('[name=dw-count]', generatorDefaults.diceware.wordCount),
@@ -96,6 +86,7 @@ const currentGeneratorPrefs = () => ({
     appendSymbols: numberValue('[name=dw-symbols]', generatorDefaults.diceware.appendSymbols)
   },
   charset: {
+    ...generatorPrefs.charset,
     length1: numberValue('[name=cs-len1]', generatorDefaults.charset.length1),
     length2: numberValue('[name=cs-len2]', generatorDefaults.charset.length2)
   }
@@ -127,7 +118,7 @@ const applyGeneratorPrefs = prefs => {
 };
 
 const saveGeneratorPrefs = () => chrome.storage.local.set({
-  [generatorPrefsKey]: currentGeneratorPrefs()
+  [generatorPrefsKey]: generatorPrefs = currentGeneratorPrefs()
 });
 
 const revealPassword = reveal => {
@@ -139,24 +130,9 @@ const revealPassword = reveal => {
 
 const runGenerator = () => {
   saveGeneratorPrefs();
-  const mode = q('#gen-panel').dataset.mode;
   let pw;
   try {
-    if (mode === 'diceware') {
-      pw = self.__kpPasswordGen.diceware({
-        wordCount: numberValue('[name=dw-count]', 3),
-        separator: q('[name=dw-sep]').value,
-        capitalize: q('[name=dw-cap]').checked,
-        appendDigits: numberValue('[name=dw-digits]', 1),
-        appendSymbols: numberValue('[name=dw-symbols]', 1)
-      });
-    }
-    else {
-      pw = self.__kpPasswordGen.charset({
-        length1: +q('[name=cs-len1]').value || 14,
-        length2: +q('[name=cs-len2]').value || 3
-      });
-    }
+    pw = self.__kpPasswordGen.generate(currentGeneratorPrefs());
   }
   catch (err) {
     showStatus(err.message, 'error');
@@ -194,6 +170,7 @@ document.addEventListener('click', e => {
     q('[data-cmd=generate]').setAttribute('aria-expanded', 'false');
   }
   else if (cmd === 'gen-mode') {
+    payloadState.edit('password');
     setGeneratorMode(target.dataset.mode);
     runGenerator();
   }
@@ -218,9 +195,11 @@ document.addEventListener('click', e => {
     });
   }
   else if (cmd === 'gen-go') {
+    payloadState.edit('password');
     runGenerator();
   }
   else if (cmd === 'url-mode') {
+    payloadState.edit('url');
     setUrlMode(target.dataset.mode);
     syncHost();
   }
@@ -261,6 +240,7 @@ const collect = () => {
 
 document.addEventListener('submit', e => {
   e.preventDefault();
+  if (!payloadReady) return;
   const form = e.target;
   qa('input[required]').forEach(el => el.classList.add('touched'));
   if (!form.checkValidity()) {
@@ -276,9 +256,10 @@ document.addEventListener('submit', e => {
 
   chrome.storage.local.get({engine: 'keepass'}, async prefs => {
     try {
-      await engine.prepare(prefs.engine);
+      const backend = target === 'ssdb' ? 'none' : prefs.engine;
+      await engine.prepare(backend);
 
-      if (prefs.engine === 'kwpass') {
+      if (backend === 'kwpass') {
         await engine.core.open(prompt(t('save_error_password_prompt') || 'Password to unlock the database?'));
       }
 
@@ -314,9 +295,28 @@ document.addEventListener('submit', e => {
 /* ---------- payload from the worker ---------- */
 
 const renderPayload = payload => {
-  // Opening the panel precedes scraping/generation; wait for the final payload.
-  if (payload?.pending) return;
-  payload = payload || {pairs: [], url: ''};
+  if (!generatorReady) return;
+  const update = payloadState.accept(payload);
+  if (!update) return;
+  if (update.reset) {
+    for (const name of ['title', 'url', 'submiturl', 'login', 'password', 'group', 'notes']) {
+      q('[name=' + name + ']').value = '';
+    }
+    q('#favicon').hidden = true;
+    revealPassword(false);
+    hideStatus();
+  }
+  payloadReady = update.phase === 'ready';
+  q('[data-cmd=save]').disabled = !payloadReady;
+  if (payloadState.canFill('url')) {
+    originalUrl = payload.url || '';
+    q('[name=url]').value = originalUrl;
+  }
+  if (!payloadReady) {
+    if (payload.error) showStatus(payload.error, 'error');
+    syncHost();
+    return;
+  }
   const pair = (payload.pairs || [])
     .filter(a => a.usernames.length || a.passwords.length)
     .sort((a, b) => {
@@ -326,11 +326,8 @@ const renderPayload = payload => {
     })
     .shift();
 
-  originalUrl = payload.url || '';
-  q('[name=url]').value = originalUrl;
-  q('[name=submiturl]').value = '';
-  q('[name=login]').value = pair?.usernames.filter(s => s).shift() || '';
-  q('[name=password]').value = pair?.passwords.filter(s => s).shift() || '';
+  if (payloadState.canFill('login')) q('[name=login]').value = pair?.usernames.filter(s => s).shift() || '';
+  if (payloadState.canFill('password')) q('[name=password]').value = pair?.passwords.filter(s => s).shift() || '';
 
   const favicon = q('#favicon');
   if (payload.favicon && /^https?:/.test(payload.favicon)) {
@@ -342,12 +339,12 @@ const renderPayload = payload => {
   }
 
   revealPassword(false);
-  setUrlMode(originalUrl ? 'origin' : 'full');
+  if (payloadState.canFill('url')) setUrlMode(originalUrl ? 'origin' : 'full');
   syncHost();
 
   // Nothing scraped from the page: this is a sign-up, offer a fresh password
   // right away instead of an empty field.
-  if (!q('[name=password]').value && generatorReady) {
+  if (!q('[name=password]').value && payloadState.canFill('password')) {
     runGenerator();
   }
 
@@ -363,26 +360,37 @@ const loadPayload = async () => {
 
 // Generator prefs must be applied before the first payload render, otherwise
 // the auto-generated password would ignore the saved mode and lengths.
-let generatorReady = false;
-chrome.storage.local.get({
-  [generatorPrefsKey]: generatorDefaults,
-  [targetPrefsKey]: 'keepass'
-}, prefs => {
-  applyGeneratorPrefs(prefs[generatorPrefsKey]);
+q('[data-cmd=save]').disabled = true;
+document.addEventListener('input', e => {
+  if (e.target.name) payloadState.edit(e.target.name);
+});
+const customStyle = localStorage.getItem('save-dialog-style');
+if (customStyle) {
+  const style = document.createElement('style');
+  style.textContent = customStyle;
+  document.head.appendChild(style);
+}
+Promise.all([
+  self.__kpPasswordPrefs.load(chrome.storage.local),
+  chrome.storage.local.get({[targetPrefsKey]: 'keepass'})
+]).then(([generator, prefs]) => {
+  generatorPrefs = generator;
+  applyGeneratorPrefs(generator);
   q('[name=target]').value = prefs[targetPrefsKey] === 'ssdb' ? 'ssdb' : 'keepass';
   generatorReady = true;
-  loadPayload();
-});
+  return loadPayload();
+}).catch(err => showStatus(err.message, 'error'));
 
 // Worker writes the scraped pairs asynchronously after the panel opens; pick
 // them up here without clobbering what the user already typed.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'session' || !sessionKey || !changes[sessionKey]) return;
-  const loginEmpty = !q('[name=login]').value;
-  const passwordEmpty = !q('[name=password]').value;
-  if (loginEmpty && passwordEmpty) {
-    renderPayload(changes[sessionKey].newValue);
+  if (area === 'local' && changes[generatorPrefsKey] && generatorReady) {
+    generatorPrefs = self.__kpPasswordPrefs.normalize(changes[generatorPrefsKey].newValue);
+    applyGeneratorPrefs(generatorPrefs);
+    return;
   }
+  if (area !== 'session' || !sessionKey || !changes[sessionKey]) return;
+  renderPayload(changes[sessionKey].newValue);
 });
 
 addEventListener('keydown', e => {
