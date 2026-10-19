@@ -188,3 +188,17 @@ test('old alternate implementations are absent and surviving pages load their sh
   assert.match(read('data/save/index.html'), /tools\/save-state.js/);
   assert.match(read('data/options/index.html'), /tools\/password-prefs.js/);
 });
+
+test('startup removes obsolete persisted menu items and keeps the remaining actions', timeout, async () => {
+  const w = worker();
+  const menu = new Map(['encrypt-data', 'open-keyboards', 'auto-login'].map(id => [id, {id}]));
+  w.chrome.contextMenus.create = item => menu.set(item.id, item);
+  w.chrome.contextMenus.remove = id => menu.delete(id);
+  await w.chrome.runtime.onStartup.fire();
+  assert.ok(!menu.has('encrypt-data'));
+  assert.ok(!menu.has('open-keyboards'));
+  assert.ok(!menu.has('auto-login'));
+  assert.ok(menu.has('generate-password'));
+  assert.ok(menu.has('save-form'));
+  assert.ok(menu.has('lock-secure-synced-storage'));
+});

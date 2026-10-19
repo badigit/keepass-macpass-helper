@@ -86,8 +86,27 @@ async function main() {
     assert.equal(await page.locator('#auto-submit-auto-login').count(), 0);
     console.log('PASS options: canonical generator settings, zero symbols, live autofill settings, removed dead controls');
     await page.evaluate(() => chrome.storage.session.set({'kp-save-form:42': {revision: 1, pending: true, url: 'https://example.test'}}));
+    await page.setViewportSize({width: 360, height: 900});
     await page.goto(base + '/data/save/index.html?tab=42');
     await page.waitForFunction(() => document.getElementById('gen-panel').dataset.mode === 'charset');
+    for (const [colorScheme, background, field] of [
+      ['light', 'rgb(255, 255, 255)', 'rgb(255, 255, 255)'],
+      ['dark', 'rgb(42, 42, 42)', 'rgb(31, 31, 31)']
+    ]) {
+      await page.emulateMedia({colorScheme});
+      const colors = await page.evaluate(() => ({
+        background: getComputedStyle(document.body).backgroundColor,
+        field: getComputedStyle(document.querySelector('[name=password]')).backgroundColor,
+        scheme: getComputedStyle(document.documentElement).colorScheme
+      }));
+      assert.deepEqual(colors, {background, field, scheme: colorScheme});
+      if (process.env.KMH_SCREENSHOTS) {
+        await fs.mkdir(process.env.KMH_SCREENSHOTS, {recursive: true});
+        await page.screenshot({path: path.join(process.env.KMH_SCREENSHOTS, 'save-' + colorScheme + '.png')});
+      }
+    }
+    await page.emulateMedia({colorScheme: 'light'});
+    console.log('PASS save panel theme: follows light/dark media and updates without reloading');
     assert.equal(await page.locator('[name=password]').inputValue(), '');
     assert.equal(await page.locator('[data-cmd=save]').isDisabled(), true);
     assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--kmh-smoke-style').trim()), 'applied');

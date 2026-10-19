@@ -647,7 +647,9 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       return;
     }
     once.done = true;
-    chrome.contextMenus.remove('auto-login', () => chrome.runtime.lastError);
+    for (const id of ['auto-login', 'encrypt-data', 'open-keyboards']) {
+      chrome.contextMenus.remove(id, () => chrome.runtime.lastError);
+    }
 
     chrome.contextMenus.create({
       id: 'generate-password',
@@ -670,11 +672,6 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       contexts: ['editable']
     }, () => chrome.runtime.lastError);
     chrome.contextMenus.create({
-      id: 'encrypt-data',
-      title: 'Encrypt or Decrypt a String',
-      contexts: ['action']
-    }, () => chrome.runtime.lastError);
-    chrome.contextMenus.create({
       id: 'lock-secure-synced-storage',
       title: 'Lock Secure Synced Storage',
       contexts: ['action']
@@ -683,13 +680,6 @@ chrome.runtime.onMessage.addListener((request, sender, response) => {
       chrome.contextMenus.create({
         id: 'open-options',
         title: 'Open Options Page',
-        contexts: ['action']
-      }, () => chrome.runtime.lastError);
-    }
-    else {
-      chrome.contextMenus.create({
-        id: 'open-keyboards',
-        title: 'Keyboard Shortcut Settings',
         contexts: ['action']
       }, () => chrome.runtime.lastError);
     }
@@ -783,33 +773,6 @@ const onCommand = async (info, tab) => {
   }
   else if (info.menuItemId === 'open-options') {
     chrome.runtime.openOptionsPage();
-  }
-  else if (info.menuItemId === 'open-keyboards') {
-    chrome.tabs.create({
-      url: 'chrome://extensions/configureCommands'
-    });
-  }
-  else if (info.menuItemId === 'encrypt-data') {
-    if (!isScriptableUrl(tab.url)) {
-      notify(tab, 'Not available on this page', '–', '#888');
-      return;
-    }
-    try {
-      const target = {
-        tabId: tab.id
-      };
-      await chrome.scripting.insertCSS({
-        target,
-        files: ['/data/safe/inject.css']
-      });
-      await chrome.scripting.executeScript({
-        target,
-        files: ['/data/safe/inject.js']
-      });
-    }
-    catch (e) {
-      notify(tab, e);
-    }
   }
   else if (info.menuItemId === 'generate-password') {
     try { await copy(await generatePassword(), tab); }
